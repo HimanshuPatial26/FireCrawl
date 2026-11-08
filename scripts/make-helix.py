@@ -4,10 +4,10 @@ Runs headless with Blender's Python module (the bpy wheel needs Python 3.13):
     pip install bpy==5.2.3 numpy
     python scripts/make-helix.py --out src/gl/helix-data.js --preview-light helix-light.png --preview-dark helix-dark.png
 
-Pipeline: two elliptical strands swept along a double helix + flat rungs (some broken in the middle)
-+ drips -> voxel remesh (fuses everything into one liquid body) -> smoothing -> low-frequency noise
-for poured, lumpy surfaces -> smoothing -> decimation -> quantised mesh written as a JS module.
-Optional Cycles previews render the result as chrome in a light and a dark softbox studio.
+Pipeline: two flat ribbon strands swept along a double helix + closely spaced flat rungs -> voxel remesh
+(fuses everything into one smooth liquid body) -> smoothing -> gentle low-frequency swell and fine liquid
+ripples -> smoothing -> decimation -> quantised mesh written as a JS module.
+Optional Cycles previews render the result as polished chrome in a white high-key studio and a dark one.
 """
 import argparse
 import base64
@@ -24,15 +24,16 @@ from mathutils import Vector, noise
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "src" / "gl" / "helix-data.js"))
 ap.add_argument("--seed", type=int, default=11)
-ap.add_argument("--turns", type=float, default=2.3)
-ap.add_argument("--pitch", type=float, default=4.4)
+ap.add_argument("--turns", type=float, default=2.2)
+ap.add_argument("--pitch", type=float, default=5.0)
 ap.add_argument("--radius", type=float, default=1.0)
-ap.add_argument("--voxel", type=float, default=0.02)
-ap.add_argument("--target-tris", type=int, default=90000)
+ap.add_argument("--voxel", type=float, default=0.016)
+ap.add_argument("--target-tris", type=int, default=100000)
 ap.add_argument("--preview-light")
 ap.add_argument("--preview-dark")
 ap.add_argument("--samples", type=int, default=96)
 ap.add_argument("--res", type=int, default=1000, help="preview height in pixels")
+ap.add_argument("--preview-material", choices=("chrome", "glass"), default="chrome")
 args = ap.parse_args()
 
 random.seed(args.seed)
@@ -102,7 +103,7 @@ def taper(u, edge=0.06):
 
 # ---------------------------------------------------------------- strands
 K = 28
-STRAND_W, STRAND_T = 0.58, 0.27
+STRAND_W, STRAND_T = 0.5, 0.3
 for phase, seed in ((0.0, 1.7), (math.pi, 9.3)):
     rings = []
     samples = int(TURNS * 120)
@@ -112,9 +113,9 @@ for phase, seed in ((0.0, 1.7), (math.pi, 9.3)):
         c = helix(th, phase)
         t, n, b = frame(th, phase)
         wob = noise.noise(Vector((th * 0.9, seed, 0.0)))
-        w = STRAND_W * (1 + 0.16 * wob) * taper(u, 0.012)
-        h = STRAND_T * (1 + 0.22 * noise.noise(Vector((th * 1.4, seed, 3.0)))) * taper(u, 0.012)
-        c = c + n * 0.05 * noise.noise(Vector((th * 0.6, seed, 7.0)))
+        w = STRAND_W * (1 + 0.07 * wob) * taper(u, 0.012)
+        h = STRAND_T * (1 + 0.1 * noise.noise(Vector((th * 1.4, seed, 3.0)))) * taper(u, 0.012)
+        c = c + n * 0.025 * noise.noise(Vector((th * 0.6, seed, 7.0)))
         ring = []
         for j in range(K):
             x, y = superellipse(2 * math.pi * j / K)
@@ -122,13 +123,12 @@ for phase, seed in ((0.0, 1.7), (math.pi, 9.3)):
         rings.append(ring)
     add_tube(rings)
 
-# ---------------------------------------------------------------- rungs (+ drips)
-drip_spots = []
-rungs_per_turn = 10
+# ---------------------------------------------------------------- rungs: closely spaced flat slats
+rungs_per_turn = 15
 count = int(TURNS * rungs_per_turn)
 for r in range(count):
     th = (r + 0.5) / count * THETA_MAX
-    if th < 0.25 or th > THETA_MAX - 0.25:
+    if th < 0.2 or th > THETA_MAX - 0.2:
         continue
     a, b = helix(th, 0.0), helix(th, math.pi)
     d = b - a
@@ -136,68 +136,31 @@ for r in range(count):
     d.normalize()
     up = Vector((0, 0, 1))
     side = d.cross(up).normalized()
-    broken = random.random() < 0.26
-    gap = random.uniform(0.1, 0.18) if broken else 0.0
-    segments = [(0.0, 0.5 - gap / length / 2), (0.5 + gap / length / 2, 1.0)] if broken else [(0.0, 1.0)]
-    rh = random.uniform(0.2, 0.26)  # vertical thickness
-    rd = random.uniform(0.36, 0.46)  # depth
-    sag = random.uniform(0.02, 0.08)
+    rh = random.uniform(0.15, 0.17)  # vertical thickness
+    rd = random.uniform(0.4, 0.46)  # depth
+    sag = random.uniform(0.0, 0.02)
     ph = random.uniform(0, 6.28)
-    for s0, s1 in segments:
-        rings = []
-        steps = 40
-        for i in range(steps + 1):
-            u = s0 + (s1 - s0) * i / steps
-            tp = taper((u - s0) / (s1 - s0), 0.1 if broken else 0.04)
-            c = a + d * (u * length)
-            c.z -= sag * math.sin(math.pi * u)
-            c += side * 0.035 * math.sin(2 * math.pi * u * 1.5 + ph)
-            hh = rh * (0.85 + 0.3 * noise.noise(Vector((u * 3, r, 1.0)))) * tp
-            dd = rd * (0.9 + 0.2 * noise.noise(Vector((u * 2, r, 5.0)))) * tp
-            ring = []
-            for j in range(20):
-                x, y = superellipse(2 * math.pi * j / 20, 2.4)
-                ring.append(c + side * (dd * 0.5 * x) + up * (hh * 0.5 * y))
-            rings.append(ring)
-        add_tube(rings)
-    if random.random() < 0.38:
-        u = random.uniform(0.28, 0.72)
-        if not broken or abs(u - 0.5) > 0.12:
-            c = a + d * (u * length)
-            c.z -= sag * math.sin(math.pi * u) + rh * 0.35
-            drip_spots.append((c, random.uniform(0.12, 0.36)))
-
-# a few drips from the strands too
-for _ in range(6):
-    th = random.uniform(0.6, THETA_MAX - 0.6)
-    phase = random.choice((0.0, math.pi))
-    c = helix(th, phase)
-    _, n, _ = frame(th, phase)
-    c = c - Vector((0, 0, STRAND_T * 0.45)) + n * 0.05
-    drip_spots.append((c, random.uniform(0.15, 0.32)))
+    rings = []
+    steps = 48
+    for i in range(steps + 1):
+        u = i / steps
+        c = a + d * (u * length)
+        c.z -= sag * math.sin(math.pi * u)
+        c += side * 0.018 * math.sin(2 * math.pi * u * 1.5 + ph)
+        hh = rh * (0.9 + 0.2 * noise.noise(Vector((u * 3, r, 1.0))))
+        dd = rd * (0.94 + 0.12 * noise.noise(Vector((u * 2, r, 5.0))))
+        ring = []
+        for j in range(20):
+            x, y = superellipse(2 * math.pi * j / 20, 2.4)
+            ring.append(c + side * (dd * 0.5 * x) + up * (hh * 0.5 * y))
+        rings.append(ring)
+    add_tube(rings)
 
 mesh = bpy.data.meshes.new("helix_raw")
 mesh.from_pydata([tuple(v) for v in verts], [], faces)
 mesh.validate()
 obj = bpy.data.objects.new("Helix", mesh)
 bpy.context.collection.objects.link(obj)
-
-# drips as small stacked ellipsoids, fused by the remesh
-for c, L in drip_spots:
-    steps = 6
-    for i in range(steps):
-        f = i / (steps - 1)
-        rad = 0.05 * (1 - 0.55 * f) if i < steps - 1 else 0.048
-        z = c.z - L * f
-        bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
-        bmesh.ops.scale(bm, vec=Vector((rad, rad, rad * (1.6 if i < steps - 1 else 1.15))), verts=bm.verts)
-        bmesh.ops.translate(bm, vec=Vector((c.x, c.y, z)), verts=bm.verts)
-        m = bpy.data.meshes.new("drip")
-        bm.to_mesh(m)
-        bm.free()
-        o = bpy.data.objects.new("drip", m)
-        bpy.context.collection.objects.link(o)
 
 # join everything
 bpy.ops.object.select_all(action="DESELECT")
@@ -218,10 +181,10 @@ def bake_modifiers(o):
 
 
 tex = bpy.data.textures.new("liquid", "CLOUDS")
-tex.noise_scale = 0.32
+tex.noise_scale = 0.5
 tex.noise_depth = 2
 tex2 = bpy.data.textures.new("ripple", "CLOUDS")
-tex2.noise_scale = 0.11
+tex2.noise_scale = 0.07
 tex2.noise_depth = 1
 
 m = obj.modifiers.new("remesh", "REMESH")
@@ -230,20 +193,20 @@ m.voxel_size = args.voxel
 m.adaptivity = 0.0
 m = obj.modifiers.new("smooth1", "SMOOTH")
 m.factor = 1.0
-m.iterations = 10
+m.iterations = 8
 m = obj.modifiers.new("lumps", "DISPLACE")
 m.texture = tex
 m.texture_coords = "GLOBAL"
-m.strength = 0.07
+m.strength = 0.035
 m.mid_level = 0.5
 m = obj.modifiers.new("ripples", "DISPLACE")
 m.texture = tex2
 m.texture_coords = "GLOBAL"
-m.strength = 0.006
+m.strength = 0.014
 m.mid_level = 0.5
 m = obj.modifiers.new("smooth2", "SMOOTH")
-m.factor = 0.9
-m.iterations = 9
+m.factor = 0.7
+m.iterations = 3
 bake_modifiers(obj)
 tris_now = sum(len(p.vertices) - 2 for p in obj.data.polygons)
 ratio = min(1.0, args.target_tris / max(1, tris_now))
@@ -307,19 +270,26 @@ def preview(path, dark):
     mat = bpy.data.materials.get("chrome") or bpy.data.materials.new("chrome")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = (0.93, 0.94, 0.96, 1)
-    bsdf.inputs["Metallic"].default_value = 1.0
-    bsdf.inputs["Roughness"].default_value = 0.045
+    if args.preview_material == "glass":
+        bsdf.inputs["Base Color"].default_value = (0.96, 0.97, 0.98, 1)
+        bsdf.inputs["Metallic"].default_value = 0.0
+        bsdf.inputs["Transmission Weight"].default_value = 1.0
+        bsdf.inputs["IOR"].default_value = 1.5
+        bsdf.inputs["Roughness"].default_value = 0.02
+    else:
+        bsdf.inputs["Base Color"].default_value = (0.93, 0.94, 0.96, 1)
+        bsdf.inputs["Metallic"].default_value = 1.0
+        bsdf.inputs["Roughness"].default_value = 0.045
     obj.data.materials.clear()
     obj.data.materials.append(mat)
     # spin so the middle rung crosses the frame, lean in the picture plane, tip the top away for depth of field
     obj.rotation_mode = "ZYX"
     centre_theta = THETA_MAX / 2
-    obj.rotation_euler = (math.radians(16), math.radians(-14), -(centre_theta % math.pi))
+    obj.rotation_euler = (math.radians(8), math.radians(-8), -(centre_theta % math.pi))
 
     world = bpy.data.worlds.get("studio") or bpy.data.worlds.new("studio")
     world.use_nodes = True
-    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.004, 0.005, 0.008, 1) if dark else (0.32, 0.33, 0.34, 1)
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.004, 0.005, 0.008, 1) if dark else (0.62, 0.63, 0.65, 1)
     world.node_tree.nodes["Background"].inputs["Strength"].default_value = 1.0
     scene.world = world
 
@@ -346,16 +316,24 @@ def preview(path, dark):
         return p
 
     # softboxes and black flags: the chrome look is entirely in what it reflects
-    # behind the camera: a black wall with bright strips -> crisp black/white bands on the chrome
-    panel("flagFront", (0.0, -20.0, 0.0), (math.radians(90), 0, 0), (40, 40), black=True)
-    panel("stripL", (-3.2, -16.0, 0.0), (math.radians(90), 0, 0), (1.1, 22), 9.0)
-    panel("stripR", (3.8, -16.0, 1.0), (math.radians(90), 0, math.radians(8)), (0.7, 22), 12.0)
-    panel("stripTop", (0.0, -15.0, 7.5), (math.radians(60), 0, 0), (14, 1.6), 7.0)
-    # sides and top
-    panel("key", (-7.5, -4.0, 5.0), (math.radians(60), 0, math.radians(-55)), (6, 10), 6.0)
-    panel("rim", (7.0, 2.0, 1.0), (math.radians(90), 0, math.radians(100)), (2.4, 18), 10.0)
-    panel("top", (0, -2.0, 11.0), (0, 0, 0), (10, 6), 3.0)
-    panel("flagL", (-9.0, 3.0, 0.0), (math.radians(90), 0, math.radians(-70)), (8, 24), black=True)
+    if dark:
+        # behind the camera: a black wall with bright strips -> crisp black/white bands on the chrome
+        panel("flagFront", (0.0, -20.0, 0.0), (math.radians(90), 0, 0), (40, 40), black=True)
+        panel("stripL", (-3.2, -16.0, 0.0), (math.radians(90), 0, 0), (1.1, 22), 9.0)
+        panel("stripR", (3.8, -16.0, 1.0), (math.radians(90), 0, math.radians(8)), (0.7, 22), 12.0)
+        panel("stripTop", (0.0, -15.0, 7.5), (math.radians(60), 0, 0), (14, 1.6), 7.0)
+        panel("key", (-7.5, -4.0, 5.0), (math.radians(60), 0, math.radians(-55)), (6, 10), 6.0)
+        panel("rim", (7.0, 2.0, 1.0), (math.radians(90), 0, math.radians(100)), (2.4, 18), 10.0)
+        panel("top", (0, -2.0, 11.0), (0, 0, 0), (10, 6), 3.0)
+        panel("flagL", (-9.0, 3.0, 0.0), (math.radians(90), 0, math.radians(-70)), (8, 24), black=True)
+    else:
+        # high-key: a wide white softbox behind the camera lights every face turned to the lens,
+        # black flags at the sides put the dark contour lines on every curve, a white cyc behind
+        panel("front", (0.0, -17.0, 0.0), (math.radians(90), 0, 0), (18, 34), 2.6)
+        panel("flagL", (-6.5, -3.5, 0.0), (math.radians(90), 0, math.radians(-60)), (4.5, 30), black=True)
+        panel("flagR", (6.5, -3.5, 0.0), (math.radians(90), 0, math.radians(60)), (4.5, 30), black=True)
+        panel("top", (0, -1.0, 10.0), (0, 0, 0), (9, 7), 3.5)
+        panel("floor", (0, 0, -9.0), (0, 0, 0), (30, 30), black=True)
     # backdrop seen by the camera (light like the references, or dark like the site)
     bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 9.0, 0), rotation=(math.radians(90), 0, 0))
     bd = bpy.context.active_object

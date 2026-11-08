@@ -503,11 +503,12 @@ export const FinalShader = {
     uFade: { value: 1 },
     uGrain: { value: 0.05 },
     uExposure: { value: 1 },
+    uVignette: { value: 0.4 },
     uRes: { value: new Vector2(1, 1) },
   },
   vertexShader: UV_VERT,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse; uniform float uTime; uniform float uFade; uniform float uGrain; uniform float uExposure; uniform vec2 uRes;
+    uniform sampler2D tDiffuse; uniform float uTime; uniform float uFade; uniform float uGrain; uniform float uExposure; uniform float uVignette; uniform vec2 uRes;
     varying vec2 vUv;
     float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     // ACES filmic fit (the curve three.js uses), then the sRGB transfer function
@@ -528,7 +529,7 @@ export const FinalShader = {
     void main(){
       vec3 c = lvSRGB(lvACES(texture2D(tDiffuse, vUv).rgb));
       vec2 v = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
-      c *= mix(0.6, 1.0, smoothstep(1.05, 0.25, length(v)));
+      c *= mix(1.0 - uVignette, 1.0, smoothstep(1.05, 0.25, length(v)));
       c += (rnd(floor(vUv * uRes) + fract(uTime * 7.13) * 91.7) - 0.5) * uGrain;
       c = mix(c, vec3(0.0), uFade);
       gl_FragColor = vec4(c, 1.0);

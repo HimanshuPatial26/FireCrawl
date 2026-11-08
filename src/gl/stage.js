@@ -713,8 +713,8 @@ export class Stage {
     if (this.helix) return;
     try {
       const { Helix } = await import('./helix.js');
-      this.helix = new Helix(this.renderer, { mobile: this.mobile, reduced: this.reduced, colors: this.colors });
-      this.scene.add(this.helix.group);
+      this.helix = new Helix(this.renderer, { mobile: this.mobile, reduced: this.reduced });
+      this.scene.add(this.helix.group, this.helix.backdrop);
     } catch (err) {
       console.warn('Helix could not be loaded; Home shows the scene without it.', err);
     }
@@ -861,6 +861,11 @@ export class Stage {
     const heroHidden = st.hero > 0.999 && !tr.active && !!this.heroRect && this.heroRect.t + this.heroRect.h < -24;
     const slatsGone = st.home > 0.985;
     this.slats.visible = !heroHidden && !slatsGone;
+    // once the light studio backdrop covers the screen, the dark sky, floor and dust behind it are skipped
+    const studioOnly = !!this.helix && st.home > 0.985;
+    this.sky.visible = !studioOnly;
+    this.floor.visible = !studioOnly;
+    this.dust.visible = !studioOnly;
     // on phones the floor sits behind the hero text, so its reflection stays faint there
     const floorDim = Math.max(st.dim, st.hero * 0.92, st.about * 0.7, this.mobile ? st.home * 0.95 : 0);
     const fu = this.floor.material.uniforms;
@@ -885,22 +890,32 @@ export class Stage {
     this.orb.rotation.y = p.sx * 0.28;
     this.orb.rotation.x = -p.sy * 0.12;
 
-    // liquid-metal helix (Home hero): right of the text on desktop, diagonal across the top on phones
+    // chrome-glass helix (Home hero) in its light studio, on the right of the text (top right on phones)
     const hx = this.helix;
-    if (hx) hx.group.visible = st.home > 0.01;
+    if (hx) {
+      hx.group.visible = st.home > 0.01;
+      hx.backdrop.visible = st.home > 0.002;
+    }
     if (hx && hx.group.visible) {
       const k = st.home;
-      const scale = this.mobile ? (visH * 0.22) / (hx.radius * 2) : (visH * 0.37) / (hx.radius * 2);
-      hx.group.scale.setScalar(scale * (0.85 + 0.15 * k));
+      const scale = this.mobile ? (visH * 0.2) / (hx.radius * 2) : (visH * 0.42) / (hx.radius * 2);
+      hx.group.scale.setScalar(scale * (0.88 + 0.12 * k));
       const sink = (1 - k) * 4;
       if (this.mobile) {
-        hx.group.position.set(0, visH * 0.25, -sink);
-        hx.group.rotation.set(0.15 + p.sy * 0.05, 0, -1.08 + p.sx * 0.04);
+        // phones: the helix lies in the band above the text, rising to the top right corner
+        hx.group.position.set(visW * 0.13, visH * 0.325, -sink);
+        hx.group.rotation.set(0.15 + p.sy * 0.04, 0, -1.04 + p.sx * 0.03);
       } else {
         hx.group.position.set(visW * 0.27, -sink * 0.3, -sink);
-        hx.group.rotation.set(0.2 - p.sy * 0.08, p.sx * 0.12, -0.26 + p.sx * 0.03);
+        hx.group.rotation.set(0.1 - p.sy * 0.06, p.sx * 0.1, -0.12 + p.sx * 0.025);
       }
       hx.update(dt, this.time, p, cam.aspect);
+    }
+    if (hx && hx.backdrop.visible) {
+      const bu = hx.backdrop.material.uniforms;
+      bu.uOpacity.value = Math.min(1, st.home * 1.02);
+      bu.uAspect.value = cam.aspect;
+      bu.uCenter.value.set(this.mobile ? 0.63 : 0.77, this.mobile ? 0.8 : 0.5);
     }
     // bloom turns chrome into milk: fade it out as the helix takes over, and skip the pass once it is gone
     this.bloom.strength = this.bloomBase * (1 - st.home);
@@ -916,6 +931,8 @@ export class Stage {
     this.distort.uniforms.tFluid.value = this.fluid.texture;
     this.distort.uniforms.uStrength.value = this.reduced ? 0 : st.fluid;
     const fp = this.finalPass.uniforms;
+    fp.uVignette.value = 0.4 - 0.27 * st.home;
+    fp.uGrain.value = 0.05 - 0.02 * st.home;
     fp.uTime.value = this.time;
     fp.uFade.value = st.fade;
 

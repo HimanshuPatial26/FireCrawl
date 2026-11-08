@@ -85,6 +85,20 @@ function setNav(route) {
   $$('[data-nav]').forEach((a) => (a.dataset.nav === key ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
 }
 
+// the pillar colour, plus a deeper shade of it that holds contrast on the light Home studio
+function setAccent(hex) {
+  root.style.setProperty('--accent', hex);
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const sat = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  root.style.setProperty('--accent-deep', `hsl(${Math.round(h * 60 + 360) % 360} ${Math.round(Math.min(0.85, sat) * 100)}% 42%)`);
+}
+
 function setupSoundButton() {
   const btn = $('.sound');
   const cv = btn.querySelector('canvas');
@@ -99,7 +113,7 @@ function setupSoundButton() {
   frameHooks.push(() => {
     const d = sound.wave();
     ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.strokeStyle = fg;
+    ctx.strokeStyle = root.classList.contains('is-home') ? '#111318' : fg;
     ctx.lineWidth = 2;
     ctx.globalAlpha = d ? 0.95 : 0.45;
     ctx.beginPath();
@@ -277,7 +291,7 @@ async function boot() {
   setupReadout();
   setupCursor();
   setupInput();
-  root.style.setProperty('--accent', projects[0].colors.a);
+  setAccent(projects[0].colors.a);
 
   const prog = { v: 0, target: 0.1 };
   const pct = $('.pre-pct');
@@ -470,14 +484,14 @@ async function enterHome(prev) {
     const idx = seq[k];
     markProof(idx);
     setIndex(idx);
-    root.style.setProperty('--accent', projects[idx].colors.a);
+    setAccent(projects[idx].colors.a);
     stage?.crossTo(idx, 1.4);
     lastShow = performance.now();
   };
 
   let current = stage && groupOf(stage.current) === 'work' ? stage.current : groupOf(app.index) === 'work' ? app.index : firstOf('work');
   setIndex(current);
-  root.style.setProperty('--accent', projects[current].colors.a);
+  setAccent(projects[current].colors.a);
   markProof(-1);
   if (stage) {
     stage.heroEl = null;
@@ -584,7 +598,7 @@ function fillWork(i) {
   fillStat(p, false);
   $$('.wl-item').forEach((b) => b.setAttribute('aria-current', String(Number(b.dataset.i) === i)));
   moveIndicator(i, true);
-  root.style.setProperty('--accent', p.colors.a);
+  setAccent(p.colors.a);
   return splitChars(link, p.title);
 }
 
@@ -629,7 +643,7 @@ function workText(i, dir) {
   });
   $$('.wl-item').forEach((b) => b.setAttribute('aria-current', String(Number(b.dataset.i) === i)));
   moveIndicator(i);
-  root.style.setProperty('--accent', p.colors.a);
+  setAccent(p.colors.a);
   live.textContent = `${p.title}, ${posIn(i) + 1} of ${members(groupOf(i)).length} in ${GROUPS[groupOf(i)].label}`;
 }
 
@@ -757,7 +771,7 @@ async function enterProject(i, prev) {
   const p = projects[i];
   setIndex(i);
   app.group = groupOf(i);
-  root.style.setProperty('--accent', p.colors.a);
+  setAccent(p.colors.a);
   renderProject(i);
   unlockScroll();
   document.title = `${p.title} · ${site.name}`;

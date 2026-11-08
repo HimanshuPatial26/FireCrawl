@@ -3,8 +3,9 @@
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
-  The hero is a liquid-chrome DNA helix modelled in Blender and rendered live: the surface keeps flowing,
-  the cursor sends ripples across it, and dragging spins it.
+  Home is set in a light studio: a liquid-chrome DNA helix, modelled in Blender and rendered live, stands on the
+  right with glass droplets around it. The surface keeps flowing, the cursor sends ripples across it, and dragging
+  spins it. Leaving Home fades the studio into the dark pages.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
 - **About** (`#about`): profile, how I work, experience (including Customer Delight), education, skills and contact.
@@ -90,8 +91,8 @@ pip install bpy==5.2.3 numpy
 python scripts/make-helix.py --preview-light helix-light.png --preview-dark helix-dark.png
 ```
 
-This rewrites `src/gl/helix-data.js` (about 90,000 triangles; `--target-tris` changes that, `--seed` reshapes the
-broken rungs and drips) and renders two Cycles previews. The site loads the mesh as a separate chunk, so the rest of
+This rewrites `src/gl/helix-data.js` (about 100,000 triangles; `--target-tris` changes that, `--pitch`, `--turns` and
+`--seed` reshape it) and renders two Cycles previews, in a white and a dark studio. The site loads the mesh as a separate chunk, so the rest of
 the page does not wait for it.
 
 ## What is in the box
@@ -101,7 +102,7 @@ the page does not wait for it.
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Liquid-metal DNA helix (Home hero): flowing surface, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py` |
+| Chrome DNA helix and light studio (Home): flowing surface, cursor ripples, drag to spin | `src/gl/helix.js` (studio lighting in `STUDIO_FRAG`), `scripts/make-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |
@@ -120,7 +121,7 @@ Performance:
 - Page geometry is measured only when layout changes; scrolling never forces a layout read.
 - Procedural artwork and floor reflections refresh at half rate on alternating frames, so no single frame carries both.
 - Work nobody can see is skipped: the hero once scrolled away, reflections under a black floor, the fluid when the cursor is still,
-  the louver wall and bloom while the helix fills Home.
+  and the louver wall, sky, floor reflections and bloom while the light studio covers Home.
 - Resolution starts inside a pixel budget, drops when frames are missed and climbs back after sustained headroom.
 - Add `?bench` to the URL to expose `window.__louver` and per-frame GPU timings (`__louver.stage.benchTimes`).
 
