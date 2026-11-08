@@ -14,7 +14,20 @@ const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
 const mobile = !finePointer || Math.min(innerWidth, innerHeight) < 600;
 const D = (s) => (reduced ? 0.001 : s);
 const pad = (n) => String(n).padStart(2, '0');
-const wrapIndex = (i) => (i + projects.length) % projects.length;
+// Two collections share one gallery: past work and Master's projects. Navigation stays inside a collection.
+const GROUPS = {
+  work: { label: 'Past work', hash: 'work', back: 'All past work', next: 'Next case study', open: 'Open case study' },
+  projects: { label: 'Projects', hash: 'projects', back: 'All projects', next: 'Next project', open: 'Open project' },
+};
+const groupOf = (i) => projects[i].group || 'work';
+const members = (g) => projects.reduce((acc, p, i) => ((p.group || 'work') === g ? (acc.push(i), acc) : acc), []);
+const neighbor = (i, dir) => {
+  const m = members(groupOf(i));
+  return m[(m.indexOf(i) + dir + m.length) % m.length];
+};
+const posIn = (i) => members(groupOf(i)).indexOf(i);
+const firstOf = (g) => members(g)[0];
+const fitChars = (text) => String(Math.max(4, text.length));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -25,24 +38,41 @@ const frameHooks = [];
 let stage = null;
 let lenis = null;
 
-const app = { route: null, index: 0, busy: false, queued: false, started: false, flipping: false, pending: null, cleanup: [] };
+const app = {
+  route: null,
+  index: firstOf('work'),
+  group: 'work',
+  last: { work: firstOf('work'), projects: firstOf('projects') },
+  busy: false,
+  queued: false,
+  started: false,
+  flipping: false,
+  pending: null,
+  cleanup: [],
+};
+const setIndex = (i) => {
+  app.index = i;
+  app.last[groupOf(i)] = i;
+};
 
 /* ------------------------------------------------------------------ */
 /* HUD                                                                 */
 /* ------------------------------------------------------------------ */
 function buildHud() {
   $('#hud').innerHTML = `
-    <a class="hud-brand" href="#work" aria-label="${esc(site.name)}, back to work">
+    <a class="hud-brand" href="#work" aria-label="${esc(site.name)}, back to past work">
       <span class="hud-name">${esc(site.name)}</span>
-      <span class="hud-role">${esc(site.role)}</span>
+      <span class="hud-role">${esc(site.role)} · ${esc(site.focus)}</span>
     </a>
     <div class="hud-status">
       <span class="dot" aria-hidden="true"></span><span>${esc(site.availability)}</span>
       <span class="readout" aria-hidden="true"></span>
     </div>
     <nav class="hud-nav" aria-label="Main">
-      <a href="#work" data-nav="work">Work</a>
+      <a href="#work" data-nav="work"><span class="nl-long">Past work</span><span class="nl-short">Work</span></a>
+      <a href="#projects" data-nav="projects">Projects</a>
       <a href="#about" data-nav="about">About</a>
+      <a class="hud-cv" href="${esc(site.resume)}" download>Resume</a>
       <button class="sound" type="button" aria-pressed="false">
         <canvas width="88" height="32" aria-hidden="true"></canvas><span class="sound-label">Sound off</span>
       </button>
@@ -50,7 +80,8 @@ function buildHud() {
 }
 
 function setNav(route) {
-  const key = route.name === 'about' ? 'about' : 'work';
+  const key =
+    route.name === 'about' ? 'about' : route.name === 'work' ? route.group : route.name === 'project' ? groupOf(route.index) : 'work';
   $$('[data-nav]').forEach((a) => (a.dataset.nav === key ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
 }
 
@@ -104,6 +135,13 @@ function setupReadout() {
     if (next !== scrolled) root.classList.toggle('is-scrolled', (scrolled = next));
   });
   const el = $('.readout');
+  if (!stage?.bench) {
+    const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: site.timezone });
+    const tick = () => el && (el.textContent = `${site.location.split(',')[0]} ${fmt.format(new Date())}`);
+    tick();
+    setInterval(tick, 15000);
+    return;
+  }
   let acc = 0;
   let frames = 0;
   frameHooks.push((dt) => {
@@ -203,7 +241,7 @@ function buildPreloader() {
     ticks += `<line class="tk${major ? ' tk-major' : ''}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
   }
   $('#pre').innerHTML = `
-    <div class="pre-head"><span>${esc(site.name)}</span><span>${esc(site.role)}</span></div>
+    <div class="pre-head"><span>${esc(site.name)}</span><span>${esc(site.role)} · ${esc(site.focus)}</span></div>
     <div class="pre-center">
       <div class="pre-dial">
         <svg viewBox="0 0 200 200" aria-hidden="true">${ticks}<circle class="pre-orbit" cx="100" cy="100" r="70"/></svg>
@@ -303,14 +341,15 @@ async function start(withSound) {
 /* ------------------------------------------------------------------ */
 function parseRoute() {
   const h = decodeURIComponent(location.hash.slice(1));
-  if (!h || h === 'work') return { name: 'work' };
+  if (!h || h === 'work') return { name: 'work', group: 'work' };
+  if (h === 'projects') return { name: 'work', group: 'projects' };
   if (h === 'about') return { name: 'about' };
   const i = projects.findIndex((p) => p.slug === h);
   if (i >= 0) return { name: 'project', index: i };
   return { name: 'lost' };
 }
 
-const sameRoute = (a, b) => a && b && a.name === b.name && a.index === b.index;
+const sameRoute = (a, b) => a && b && a.name === b.name && a.index === b.index && a.group === b.group;
 
 async function navigate() {
   if (!app.started) return;
@@ -372,7 +411,7 @@ async function leave(prev, next) {
 
 async function enter(route, prev) {
   root.classList.toggle('is-work', route.name === 'work');
-  if (route.name === 'work') return enterWork(prev);
+  if (route.name === 'work') return enterWork(prev, route);
   if (route.name === 'project') return enterProject(route.index, prev);
   if (route.name === 'about') return enterAbout();
   return enterLost();
@@ -381,26 +420,28 @@ async function enter(route, prev) {
 /* ------------------------------------------------------------------ */
 /* Work index                                                          */
 /* ------------------------------------------------------------------ */
-function renderWork() {
-  const items = projects
+function renderWork(g) {
+  const m = members(g);
+  const items = m
     .map(
-      (p, i) =>
-        `<li><button type="button" class="wl-item" data-i="${i}"><span class="wl-n">${pad(i + 1)}</span><span class="wl-t">${esc(p.title)}</span></button></li>`
+      (i, k) =>
+        `<li><button type="button" class="wl-item" data-i="${i}"><span class="wl-n">${pad(k + 1)}</span><span class="wl-t">${esc(projects[i].title)}</span></button></li>`
     )
     .join('');
-  const ticks = projects.map((p, i) => `<button type="button" class="ws-tick" data-i="${i}" aria-label="Show ${esc(p.title)}"></button>`).join('');
+  const ticks = m.map((i) => `<button type="button" class="ws-tick" data-i="${i}" aria-label="Show ${esc(projects[i].title)}"></button>`).join('');
   view.innerHTML = `
-    <section class="work" aria-label="Selected work">
-      <h1 class="sr-only">Selected work</h1>
-      <ol class="work-list">${items}</ol>
+    <section class="work" aria-label="${GROUPS[g].label}">
+      <h1 class="sr-only">${GROUPS[g].label}</h1>
+      <div class="work-list"><p class="wl-head">${GROUPS[g].label}</p><ol>${items}</ol></div>
       <div class="work-feature">
         <p class="wf-eyebrow"><span class="wf-client"></span><span class="wf-sep" aria-hidden="true"></span><span class="wf-year"></span></p>
         <h2 class="wf-title"><a class="wf-link" href="#"></a></h2>
         <p class="wf-summary"></p>
-        <a class="btn wf-cta" href="#"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Open project</span><span class="btn-arrow" aria-hidden="true">→</span></a>
+        <a class="btn wf-cta" href="#"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">${GROUPS[g].open}</span><span class="btn-arrow" aria-hidden="true">→</span></a>
       </div>
       <div class="work-scrub">
-        <p class="ws-count" aria-hidden="true"><span class="ws-cur">${pad(app.index + 1)}</span><span class="ws-tot">/ ${pad(projects.length)}</span></p>
+        <p class="ws-stat"><span class="ws-stat-v"></span><span class="ws-stat-l"></span></p>
+        <p class="ws-count" aria-hidden="true"><span class="ws-cur">${pad(posIn(app.index) + 1)}</span><span class="ws-tot">/ ${pad(m.length)}</span></p>
         <div class="ws-track">${ticks}<span class="ws-ind" aria-hidden="true"></span></div>
         <p class="ws-hint">${finePointer ? 'Scroll, drag or use the arrow keys' : 'Swipe to browse'}</p>
       </div>
@@ -408,15 +449,31 @@ function renderWork() {
   $$('.wl-item, .ws-tick').forEach((b) => b.addEventListener('click', () => goTo(Number(b.dataset.i))));
 }
 
+function fillStat(p, animate) {
+  const [v, l] = (p.metrics && p.metrics[0]) || ['', ''];
+  const stat = $('.ws-stat');
+  if (!stat) return;
+  stat.hidden = !v;
+  if (animate) {
+    scramble($('.ws-stat-v'), v, { duration: 0.6 });
+    scramble($('.ws-stat-l'), l, { duration: 0.8 });
+  } else {
+    $('.ws-stat-v').textContent = v;
+    $('.ws-stat-l').textContent = l;
+  }
+}
+
 function fillWork(i) {
   const p = projects[i];
   const link = $('.wf-link');
   link.href = `#${p.slug}`;
   $('.wf-cta').href = `#${p.slug}`;
-  $('.wf-client').textContent = p.client;
+  $('.wf-client').textContent = p.company;
   $('.wf-year').textContent = p.year;
   $('.wf-summary').textContent = p.summary;
-  $('.ws-cur').textContent = pad(i + 1);
+  $('.ws-cur').textContent = pad(posIn(i) + 1);
+  $('.wf-title').style.setProperty('--chars', fitChars(p.title));
+  fillStat(p, false);
   $$('.wl-item').forEach((b) => b.setAttribute('aria-current', String(Number(b.dataset.i) === i)));
   moveIndicator(i, true);
   root.style.setProperty('--accent', p.colors.a);
@@ -439,14 +496,16 @@ function workText(i, dir) {
   gsap.killTweensOf(old);
   gsap.to(old, { yPercent: -110 * dir, duration: D(0.36), ease: 'power3.in', stagger: { each: 0.012, from } });
   gsap.delayedCall(D(0.38), () => {
+    $('.wf-title')?.style.setProperty('--chars', fitChars(p.title));
     const chars = splitChars(link, p.title);
     gsap.fromTo(chars, { yPercent: 110 * dir }, { yPercent: 0, duration: D(1.05), ease: 'expo.out', stagger: { each: 0.03, from } });
   });
   link.href = `#${p.slug}`;
   $('.wf-cta').href = `#${p.slug}`;
-  scramble($('.wf-client'), p.client, { duration: 0.7 });
+  scramble($('.wf-client'), p.company, { duration: 0.7 });
   scramble($('.wf-year'), p.year, { duration: 0.5 });
-  scramble($('.ws-cur'), pad(i + 1), { duration: 0.45 });
+  scramble($('.ws-cur'), pad(posIn(i) + 1), { duration: 0.45 });
+  fillStat(p, true);
   const sum = $('.wf-summary');
   gsap.to(sum, {
     opacity: 0,
@@ -463,23 +522,33 @@ function workText(i, dir) {
   $$('.wl-item').forEach((b) => b.setAttribute('aria-current', String(Number(b.dataset.i) === i)));
   moveIndicator(i);
   root.style.setProperty('--accent', p.colors.a);
-  live.textContent = `${p.title}, project ${i + 1} of ${projects.length}`;
+  live.textContent = `${p.title}, ${posIn(i) + 1} of ${members(groupOf(i)).length} in ${GROUPS[groupOf(i)].label}`;
 }
 
-async function enterWork(prev) {
+async function enterWork(prev, route) {
+  const g = route.group;
+  if (groupOf(app.index) !== g) app.index = app.last[g] ?? firstOf(g);
+  app.group = g;
   lockScroll();
-  renderWork();
+  renderWork(g);
   const chars = fillWork(app.index);
-  document.title = `${site.name} · ${site.role}`;
+  document.title = g === 'work' ? `${site.name} · ${site.role}` : `${GROUPS[g].label} · ${site.name}`;
   if (stage) {
     stage.heroEl = null;
-    if (stage.current !== app.index) stage.setProject(app.index);
+    if (stage.current !== app.index) {
+      // switching between the two collections plays the slat wave; other entries crossfade
+      if (prev?.name === 'work') {
+        sound.louvers(1.8, 26, 1);
+        stage.flipTo(app.index, 1);
+      } else if (prev) stage.crossTo(app.index, 0.9);
+      else stage.setProject(app.index);
+    }
     stage.setMode('work', { duration: prev ? 1.8 : 2.8 });
   }
   const tl = gsap.timeline({ delay: D(prev ? 0.55 : 0.9) });
   tl.fromTo(chars, { yPercent: 110 }, { yPercent: 0, duration: D(1.2), stagger: 0.035, ease: 'expo.out' }, 0)
     .fromTo('.wf-eyebrow, .wf-summary, .wf-cta', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: D(1), stagger: 0.08, ease: 'expo.out' }, 0.2)
-    .fromTo('.wl-item', { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: D(0.9), stagger: 0.04, ease: 'expo.out' }, 0.1)
+    .fromTo('.wl-head, .wl-item', { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: D(0.9), stagger: 0.04, ease: 'expo.out' }, 0.1)
     .fromTo('.work-scrub > *', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: D(0.9), stagger: 0.08, ease: 'expo.out' }, 0.3);
   await wait(reduced ? 0 : 300);
 }
@@ -488,19 +557,19 @@ async function workOut() {
   const chars = $$('.wf-link .sci');
   await Promise.all([
     gsap.to(chars, { yPercent: -110, duration: D(0.45), stagger: 0.015, ease: 'power3.in' }),
-    gsap.to('.wf-eyebrow, .wf-summary, .wf-cta, .wl-item, .work-scrub > *', { opacity: 0, y: -8, duration: D(0.4), stagger: 0.015, ease: 'power2.in' }),
+    gsap.to('.wf-eyebrow, .wf-summary, .wf-cta, .wl-head, .wl-item, .work-scrub > *', { opacity: 0, y: -8, duration: D(0.4), stagger: 0.015, ease: 'power2.in' }),
   ]);
 }
 
 async function goTo(i, dir) {
-  if (app.route?.name !== 'work' || app.busy || i === app.index) return;
+  if (app.route?.name !== 'work' || app.busy || i === app.index || groupOf(i) !== app.group) return;
   if (app.flipping) {
     app.pending = { i, dir };
     return;
   }
   app.flipping = true;
   dir = dir || (i > app.index ? 1 : -1);
-  app.index = i;
+  setIndex(i);
   sound.woosh(dir);
   sound.louvers(1.8, 26, dir);
   workText(i, dir);
@@ -513,42 +582,44 @@ async function goTo(i, dir) {
   }
 }
 
-const step = (dir) => goTo(wrapIndex(app.index + dir), dir);
+const step = (dir) => goTo(neighbor(app.index, dir), dir);
 
 /* ------------------------------------------------------------------ */
 /* Project page                                                        */
 /* ------------------------------------------------------------------ */
 function renderProject(i) {
   const p = projects[i];
-  const next = projects[wrapIndex(i + 1)];
-  const meta = [['Client', p.client], p.agency ? ['Agency', p.agency] : null, ['Role', p.role], ['Year', p.year]].filter(Boolean);
-  const cap = (k) => esc((p.captions && p.captions[k]) || `${p.title}, view ${k + 1}`);
+  const g = groupOf(i);
+  const next = projects[neighbor(i, 1)];
+  const meta = [['Company', p.company], ['Role', p.role], ['Period', p.period], ['Focus', p.area]].filter(([, v]) => v);
+  const caption = (k) => esc((p.visuals && p.visuals[k]) || `${p.title} ${k + 1}`);
+  const fig = (k, cls) =>
+    `<figure class="media ${cls}"><div class="media-box" data-variant="${k}"></div><figcaption><span>${pad(k + 1)}</span>${caption(k)}</figcaption></figure>`;
+  const metrics = (p.metrics || [])
+    .map(([v, l]) => `<li><span class="pm-v">${esc(v)}</span><span class="pm-l">${esc(l)}</span></li>`)
+    .join('');
   view.innerHTML = `
     <article class="project">
       <div class="p-hero" aria-hidden="true"></div>
       <header class="p-head">
-        <a class="p-back" href="#work"><span aria-hidden="true">←</span> All work</a>
-        <p class="p-count">${pad(i + 1)} / ${pad(projects.length)}</p>
-        <h1 class="p-title">${esc(p.title)}</h1>
+        <a class="p-back" href="#${GROUPS[g].hash}"><span aria-hidden="true">←</span> ${GROUPS[g].back}</a>
+        <p class="p-count">${GROUPS[g].label} · ${pad(posIn(i) + 1)} / ${pad(members(g).length)}</p>
+        <h1 class="p-title" style="--chars:${fitChars(p.title)}">${esc(p.title)}</h1>
         <p class="p-summary">${esc(p.summary)}</p>
         <dl class="p-meta">${meta.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
-        ${
-          p.url
-            ? `<a class="btn p-live" href="${esc(p.url)}" target="_blank" rel="noopener"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Visit the live site</span><span class="btn-arrow" aria-hidden="true">↗</span></a>`
-            : ''
-        }
+        ${metrics ? `<ul class="p-metrics" aria-label="Key results">${metrics}</ul>` : ''}
       </header>
-      <section class="p-body" aria-label="Project details">
+      <section class="p-body" aria-label="Details">
         <p class="p-para">${esc(p.body[0])}</p>
-        <figure class="media m-wide"><div class="media-box" data-variant="0"></div><figcaption><span>01</span>${cap(0)}</figcaption></figure>
-        <p class="p-para p-para--right">${esc(p.body[1] || '')}</p>
-        <figure class="media m-right"><div class="media-box" data-variant="1"></div><figcaption><span>02</span>${cap(1)}</figcaption></figure>
-        <figure class="media m-left"><div class="media-box" data-variant="2"></div><figcaption><span>03</span>${cap(2)}</figcaption></figure>
+        ${fig(0, 'm-wide')}
+        ${p.body[1] ? `<p class="p-para p-para--right">${esc(p.body[1])}</p>` : ''}
+        ${fig(1, 'm-right')}
+        ${fig(2, 'm-left')}
       </section>
-      <a class="p-next" href="#${next.slug}" aria-label="Next project: ${esc(next.title)}">
-        <span class="pn-label">Next project</span>
+      <a class="p-next" href="#${next.slug}" aria-label="${GROUPS[g].next}: ${esc(next.title)}">
+        <span class="pn-label">${GROUPS[g].next}</span>
         <span class="pn-media" aria-hidden="true"><span class="media-box" data-next></span></span>
-        <span class="pn-title" aria-hidden="true">${esc(next.title)}</span>
+        <span class="pn-title" style="--chars:${fitChars(next.title)}" aria-hidden="true">${esc(next.title)}</span>
         <span class="pn-bar" aria-hidden="true"><span class="pn-fill"></span></span>
         <span class="pn-hint" aria-hidden="true">Keep scrolling or select to continue</span>
       </a>
@@ -558,7 +629,8 @@ function renderProject(i) {
 async function enterProject(i, prev) {
   const fromProject = prev?.name === 'project';
   const p = projects[i];
-  app.index = i;
+  setIndex(i);
+  app.group = groupOf(i);
   root.style.setProperty('--accent', p.colors.a);
   renderProject(i);
   unlockScroll();
@@ -582,7 +654,7 @@ async function enterProject(i, prev) {
       stage.setMode('project', { duration: 1.9 });
     }
     const items = $$('.p-body .media-box').map((el) => ({ el, index: i, variant: Number(el.dataset.variant) + 1 }));
-    items.push({ el: $('.pn-media .media-box'), index: wrapIndex(i + 1), variant: 0, kind: 'next' });
+    items.push({ el: $('.pn-media .media-box'), index: neighbor(i, 1), variant: 0, kind: 'next' });
     stage.setMedia(items);
   }
 
@@ -592,14 +664,14 @@ async function enterProject(i, prev) {
   const tl = gsap.timeline({ delay: D(fromProject ? 0.4 : 0.9) });
   tl.fromTo(chars, { yPercent: 110 }, { yPercent: 0, duration: D(1.3), stagger: 0.04, ease: 'expo.out' }, 0)
     .fromTo(sumWords, { yPercent: 100 }, { yPercent: 0, duration: D(1), stagger: 0.012, ease: 'expo.out' }, 0.15)
-    .fromTo('.p-back, .p-count, .p-meta > div, .p-live', { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: D(0.9), stagger: 0.06, ease: 'expo.out' }, 0.25);
+    .fromTo('.p-back, .p-count, .p-meta > div, .p-metrics li', { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: D(0.9), stagger: 0.06, ease: 'expo.out' }, 0.25);
 
   setupProjectScroll(i);
   await wait(reduced ? 0 : 400);
 }
 
 function setupProjectScroll(i) {
-  const next = projects[wrapIndex(i + 1)];
+  const next = projects[neighbor(i, 1)];
   const footer = $('.p-next');
   const fill = $('.pn-fill');
   const ttl = $('.pn-title');
@@ -650,22 +722,36 @@ function setupProjectScroll(i) {
 /* About and 404                                                       */
 /* ------------------------------------------------------------------ */
 function renderAbout() {
+  const list = (rows) =>
+    rows
+      .map((r) => `<li><span class="al-role">${esc(r.role)}</span><span class="al-org">${esc(r.org)}</span><span class="al-period">${esc(r.period)}</span></li>`)
+      .join('');
   view.innerHTML = `
     <article class="about">
-      <p class="a-eyebrow">About</p>
+      <p class="a-eyebrow">About · ${esc(site.location)}</p>
       <h1 class="a-lede">${esc(site.intro)}</h1>
+      <div class="a-actions">
+        <a class="btn btn--solid" href="${esc(site.resume)}" download><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Download resume</span><span class="btn-arrow" aria-hidden="true">↓</span></a>
+        <a class="btn" href="${esc(site.linkedin)}" target="_blank" rel="noopener"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">LinkedIn</span><span class="btn-arrow" aria-hidden="true">↗</span></a>
+      </div>
       <div class="a-grid">
         <section class="a-col a-bio"><h2>Profile</h2>${site.about.map((t) => `<p>${esc(t)}</p>`).join('')}</section>
-        <section class="a-col"><h2>Services</h2><ul>${site.services.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></section>
-        <section class="a-col"><h2>Toolkit</h2><ul>${site.toolkit.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></section>
+        <section class="a-col"><h2>Experience</h2><ul class="a-list">${list(site.experience)}</ul></section>
+        <section class="a-col"><h2>Education</h2><ul class="a-list">${list(site.education)}</ul></section>
+        <section class="a-col"><h2>Skills</h2><dl class="a-skills">${site.skills
+          .map((k) => `<div><dt>${esc(k.label)}</dt><dd>${k.items.map(esc).join(' · ')}</dd></div>`)
+          .join('')}</dl></section>
         <section class="a-col a-contact">
           <h2>Contact</h2>
           <p class="a-email"><a href="mailto:${esc(site.email)}">${esc(site.email)}</a></p>
           <button type="button" class="btn a-copy"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Copy email</span></button>
-          <ul class="a-social">${site.socials.map((s) => `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label)} <span aria-hidden="true">↗</span></a></li>`).join('')}</ul>
+          <ul class="a-social">
+            <li><a href="${esc(site.linkedin)}" target="_blank" rel="noopener">LinkedIn <span aria-hidden="true">↗</span></a></li>
+            <li><a href="${esc(site.resume)}" download>Resume (PDF) <span aria-hidden="true">↓</span></a></li>
+          </ul>
         </section>
       </div>
-      <p class="a-note">The particle field reacts to your cursor${sound.enabled ? ' and to the soundtrack' : ''}.</p>
+      <p class="a-note">The portrait is drawn in particles and moves away from your cursor${sound.enabled ? '; it also pulses with the soundtrack' : ''}.</p>
     </article>`;
   const copy = $('.a-copy');
   copy.addEventListener('click', async () => {
@@ -696,7 +782,7 @@ async function enterAbout() {
   const tl = gsap.timeline({ delay: D(0.6) });
   tl.fromTo('.a-eyebrow', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: D(0.9), ease: 'expo.out' }, 0)
     .fromTo(words, { yPercent: 105 }, { yPercent: 0, duration: D(1.2), stagger: 0.025, ease: 'expo.out' }, 0.05)
-    .fromTo('.a-col, .a-note', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: D(1.1), stagger: 0.08, ease: 'expo.out' }, 0.4);
+    .fromTo('.a-actions .btn, .a-col, .a-note', { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: D(1.1), stagger: 0.08, ease: 'expo.out' }, 0.4);
   await wait(reduced ? 0 : 300);
 }
 
@@ -705,8 +791,8 @@ async function enterLost() {
     <section class="lost">
       <p class="lost-code">404</p>
       <h1>Nothing at this address</h1>
-      <p>The link may be mistyped, or the project has moved.</p>
-      <a class="btn" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Back to the work</span></a>
+      <p>The link may be mistyped, or the page has moved.</p>
+      <a class="btn" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Back to past work</span></a>
     </section>`;
   lockScroll();
   document.title = `Not found · ${site.name}`;
@@ -740,7 +826,7 @@ function setupInput() {
       wheel.last = now;
       if (!wheel.active) {
         Object.assign(wheel, { active: true, dir: Math.sign(d), p: 0, target: 0, ticks: 0 });
-        wheel.idx = wrapIndex(app.index + wheel.dir);
+        wheel.idx = neighbor(app.index, wheel.dir);
         app.flipping = true;
         stage?.scrubStart(wheel.idx, wheel.dir);
       }
@@ -748,7 +834,7 @@ function setupInput() {
       if (wheel.target < -0.04) {
         // reversed before committing: scrub towards the other neighbour instead
         wheel.dir *= -1;
-        wheel.idx = wrapIndex(app.index + wheel.dir);
+        wheel.idx = neighbor(app.index, wheel.dir);
         wheel.target = -wheel.target;
         wheel.p = 0;
         stage?.scrubStart(wheel.idx, wheel.dir);
@@ -760,7 +846,7 @@ function setupInput() {
     const { idx, dir, p } = wheel;
     wheel.active = false;
     if (commit) {
-      app.index = idx;
+      setIndex(idx);
       sound.woosh(dir, 0.8);
       sound.louvers(Math.max(0.4, (1 - p) * 1.6), Math.max(4, Math.round(26 * (1 - p))), dir);
       workText(idx, dir);
@@ -811,7 +897,7 @@ function setupInput() {
       const dir = dx < 0 ? 1 : -1;
       if (Math.abs(dx) > 8 && dir !== drag.dir) {
         drag.dir = dir;
-        drag.target = wrapIndex(app.index + dir);
+        drag.target = neighbor(app.index, dir);
         stage?.scrubStart(drag.target, dir);
       }
       if (drag.dir) {
@@ -838,7 +924,7 @@ function setupInput() {
     drag.dir = 0;
     app.flipping = true;
     if (commit) {
-      app.index = target;
+      setIndex(target);
       sound.woosh(dir, 0.8);
       sound.louvers(Math.max(0.4, (1 - drag.p) * 1.6), Math.max(4, Math.round(26 * (1 - drag.p))), dir);
       workText(target, dir);
@@ -863,7 +949,7 @@ function setupInput() {
         location.hash = projects[app.index].slug;
       }
     } else if (e.key === 'Escape') {
-      location.hash = 'work';
+      location.hash = r === 'project' ? GROUPS[groupOf(app.index)].hash : 'work';
     }
   });
 }

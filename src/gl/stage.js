@@ -7,6 +7,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { Fluid } from './fluid.js';
 import * as S from './shaders.js';
+import { PORTRAIT } from './portrait-data.js';
 
 // Louver wall size in world units (16:9)
 const W = 9.6;
@@ -317,29 +318,36 @@ export class Stage {
     this.scene.add(this.dust);
   }
 
+  // The About page portrait: particles sampled from the headshot, with depth for parallax.
   initOrb() {
-    const n = this.mobile ? 5000 : 11000;
+    const PH = 3.4; // portrait height in world units before scaling
+    const raw = Uint8Array.from(atob(PORTRAIT.data), (c) => c.charCodeAt(0));
+    const n = this.mobile ? Math.min(8000, PORTRAIT.count) : PORTRAIT.count;
     const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
     const rnd = new Float32Array(n);
-    const golden = Math.PI * (3 - Math.sqrt(5));
     for (let i = 0; i < n; i++) {
-      const y = 1 - (i / (n - 1)) * 2;
-      const rad = Math.sqrt(1 - y * y);
-      const th = golden * i;
-      const R = 1.55 + (Math.random() - 0.5) * 0.06;
-      pos[i * 3] = Math.cos(th) * rad * R;
-      pos[i * 3 + 1] = y * R;
-      pos[i * 3 + 2] = Math.sin(th) * rad * R;
+      const o = i * 6;
+      const jx = (Math.random() - 0.5) / 255;
+      const jy = (Math.random() - 0.5) / 255;
+      pos[i * 3] = (raw[o] / 255 - 0.5 + jx) * PORTRAIT.aspect * PH;
+      pos[i * 3 + 1] = (0.5 - raw[o + 1] / 255 + jy) * PH;
+      pos[i * 3 + 2] = (raw[o + 2] / 255 - 0.5) * 0.9;
+      col[i * 3] = raw[o + 3] / 255;
+      col[i * 3 + 1] = raw[o + 4] / 255;
+      col[i * 3 + 2] = raw[o + 5] / 255;
       rnd[i] = Math.random();
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aCol', new THREE.BufferAttribute(col, 3));
     g.setAttribute('aRand', new THREE.BufferAttribute(rnd, 1));
+    this.portraitH = PH;
     this.orb = new THREE.Points(
       g,
       new THREE.ShaderMaterial({
-        vertexShader: S.ORB_VERT,
-        fragmentShader: S.ORB_FRAG,
+        vertexShader: S.PORTRAIT_VERT,
+        fragmentShader: S.PORTRAIT_FRAG,
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
@@ -351,6 +359,7 @@ export class Stage {
           uAspect: { value: 1 },
           uMouse: { value: new THREE.Vector2(9, 9) },
           uA: { value: this.colors.a },
+          uScanH: { value: PH },
         },
       })
     );
@@ -764,8 +773,9 @@ export class Stage {
     const visH = 2 * st.camZ * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
     const visW = visH * cam.aspect;
     const upp = visH / innerHeight;
-    const ws = Math.min((visH * 0.6) / H, (visW * (this.mobile ? 0.94 : 0.72)) / W);
-    const work = { x: 0, y: visH * (this.mobile ? 0.1 : 0.07), z: 0, sx: ws, sy: ws };
+    const ws = Math.min((visH * 0.6) / H, (visW * (this.mobile ? 0.94 : 0.68)) / W);
+    // on desktop the wall sits slightly right so the project list on the left stays clear
+    const work = { x: this.mobile ? 0 : visW * 0.055, y: visH * (this.mobile ? 0.1 : 0.07), z: 0, sx: ws, sy: ws };
     if (this.heroEl && this.heroEl.isConnected) this.heroRect = this.rect(this.heroEl);
     let hero = work;
     if (this.heroRect) {
@@ -827,7 +837,7 @@ export class Stage {
     // skip work nobody can see: an off-screen hero, and reflections under a black floor
     const heroHidden = st.hero > 0.999 && !tr.active && !!this.heroRect && this.heroRect.t + this.heroRect.h < -24;
     this.slats.visible = !heroHidden;
-    const floorDim = Math.max(st.dim, st.hero * 0.92);
+    const floorDim = Math.max(st.dim, st.hero * 0.92, st.about * 0.7);
     const fu = this.floor.material.uniforms;
     fu.uTime.value = this.time;
     fu.uDim.value = floorDim;
@@ -842,10 +852,13 @@ export class Stage {
     ou.uShow.value = st.orb;
     ou.uLevel.value += (this.level - ou.uLevel.value) * (1 - Math.exp(-dt * 12));
     ou.uMouse.value.set(p.has ? p.sx : 9, p.has ? p.sy : 9);
-    this.orb.scale.setScalar(this.mobile ? 0.62 : 1);
-    if (this.mobile) this.orb.position.set(0, visH * 0.22, 0);
-    else this.orb.position.set(visW * 0.24, 0.1, 0);
-    this.orb.rotation.y = this.time * 0.05;
+    // portrait: right of the text on desktop, above it on phones; it turns gently towards the pointer
+    const ph = this.mobile ? visH * 0.36 : Math.min(visH * 0.7, visW * 0.42);
+    this.orb.scale.setScalar(ph / this.portraitH);
+    if (this.mobile) this.orb.position.set(0, visH * 0.24, 0);
+    else this.orb.position.set(visW * 0.265, -visH * 0.02, 0);
+    this.orb.rotation.y = p.sx * 0.28;
+    this.orb.rotation.x = -p.sy * 0.12;
 
     // fluid: simulate while the pointer moves, then rest once the field has settled
     if (st.fluid > 0.01 && !this.reduced) {

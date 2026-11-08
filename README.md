@@ -1,8 +1,14 @@
-# Louver Portfolio
+# Himanshu Patial · Portfolio
 
-A WebGL portfolio for a creative developer. Projects are shown on an arc of louver slats that
-flip in a staggered wave, open around the cursor and flatten into the hero image of each project page.
-All code, artwork and sound are original and generated at runtime: there are no image, video or audio files.
+Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
+
+- **Past work** (`#work`): case studies from Classplus, from Payments & Autopay to Customer Delight.
+- **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
+- **About** (`#about`): profile, experience, education, skills, contact, LinkedIn and the resume PDF.
+
+Case studies sit on an arc of louver slats that flip in a staggered wave, open around the cursor and flatten
+into the hero image of each page. The artwork is generated at runtime, so no confidential product screens are shown.
+The About page draws the portrait from particles sampled from the headshot.
 
 ## Run it
 
@@ -34,27 +40,38 @@ Until Pages is on, the workflow still builds the site to check it, and skips the
 
 Any other static host (Vercel, Netlify, Cloudflare Pages) works too: build command `npm run build`, output folder `dist`.
 
-## Make it yours
+## Editing content
 
-Everything you need to edit is in `src/content.js`:
+All copy lives in `src/content.js`:
 
-- `site`: name, role, availability line, email, intro, profile, services, toolkit, social links.
-- `projects`: one entry per project. `colors` tints the whole 3D scene for that project.
-  `style` (0 to 5) and `seed` choose the generative artwork used until you add real media.
+- `site`: name, role, availability, email, LinkedIn, resume path, profile, experience, education and skills.
+- `projects`: one entry per case study. `group: 'work'` lists it under Past work, `group: 'projects'` under Projects.
+  `metrics` are the key results (the first one also shows on the index). `colors` tints the whole 3D scene,
+  and `style` (0 to 5) with `seed` choose the generative artwork.
 
-To use your own images or videos, add a `cover` (index wall and project hero) and a `media` array
-(the three blocks on the project page) to a project:
+The resume download is `public/himanshu-patial-resume.pdf`; replace that file to update it.
+
+To show real screenshots instead of generated artwork, add a `cover` (index wall and page hero) and a
+`media` array (the three illustrations) to an entry, and put the files in `public/media/`:
 
 ```js
-cover: { type: 'image', src: './media/halcyon-cover.jpg' },
+cover: { type: 'image', src: './media/payments-cover.jpg' },
 media: [
-  { type: 'video', src: './media/halcyon-01.mp4' },
-  { type: 'image', src: './media/halcyon-02.jpg' },
-  { type: 'image', src: './media/halcyon-03.jpg' },
+  { type: 'video', src: './media/payments-01.mp4' },
+  { type: 'image', src: './media/payments-02.jpg' },
+  { type: 'image', src: './media/payments-03.jpg' },
 ],
 ```
 
-Put the files in `public/media/` so Vite copies them into the build.
+### Portrait
+
+The About page portrait is generated from a headshot on a plain backdrop (needs Python with numpy and Pillow):
+
+```bash
+python3 scripts/make-portrait.py path/to/headshot.png --preview portrait-preview.png
+```
+
+This rewrites `src/gl/portrait-data.js`.
 
 ## What is in the box
 
@@ -62,14 +79,15 @@ Put the files in `public/media/` so Vite copies them into the build.
 | --- | --- |
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
+| Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |
 | Router, views, preloader, cursor, input | `src/main.js` |
 | Layout and type | `src/style.css` |
 
-Interaction: scroll, drag or use the arrow keys on the index; Enter opens the current project; Escape goes back.
-Scrolling to the end of a project pulls you into the next one.
+Interaction: scroll, drag or use the arrow keys on the index; Enter opens the current case study; Escape goes back.
+Scrolling to the end of a case study pulls you into the next one in the same section.
 
 Accessibility: keyboard navigation, visible focus, screen-reader announcements for the current project,
 and `prefers-reduced-motion` support (crossfades instead of flips, no fluid, native scroll).

@@ -391,44 +391,52 @@ void main(){
 }
 `;
 
-export const ORB_VERT = /* glsl */ `
-attribute float aRand;
-uniform float uTime; uniform float uShow; uniform float uLevel; uniform float uPR; uniform float uAspect; uniform vec2 uMouse;
-varying float vA; varying float vR;
+// Particle portrait built from the headshot (see scripts/make-portrait.py)
+export const PORTRAIT_VERT = /* glsl */ `
+attribute vec3 aCol; attribute float aRand;
+uniform float uTime; uniform float uShow; uniform float uLevel; uniform float uPR; uniform float uAspect;
+uniform vec2 uMouse; uniform vec3 uA; uniform float uScanH;
+varying vec3 vCol; varying float vA;
 void main(){
-  vec3 n = normalize(position);
-  float t = uTime * 0.35;
   vec3 p = position;
-  float d = sin(p.x * 2.3 + t) * sin(p.y * 2.7 + t * 1.3) * sin(p.z * 2.1 + t * 0.7);
-  p += n * (d * 0.32 + uLevel * 0.7 * aRand + sin(t * 2.0 + aRand * 30.0) * 0.02);
-  float ang = t * 0.25 + p.y * 0.22;
-  float c = cos(ang); float s = sin(ang);
-  p.xz = mat2(c, -s, s, c) * p.xz;
-  vec3 scatter = n * (2.6 + aRand * 2.4);
-  p = mix(scatter, p, smoothstep(0.0, 1.0, clamp(uShow * 1.4 - aRand * 0.4, 0.0, 1.0)));
+  float t = uTime;
+  // breathing drift, and a little depth pulse with the soundtrack
+  p += vec3(sin(t * 0.6 + aRand * 20.0), cos(t * 0.5 + aRand * 31.0), sin(t * 0.8 + aRand * 12.0)) * vec3(0.006, 0.006, 0.02);
+  p.z += uLevel * 0.3 * aRand;
+
+  // assemble from a scattered cloud as the page opens
+  vec3 dir = normalize(vec3(sin(aRand * 91.0), cos(aRand * 47.0), sin(aRand * 13.0) + 0.3));
+  vec3 scatter = p * 1.6 + dir * (1.5 + aRand * 2.5);
+  float k = clamp(uShow * 1.5 - aRand * 0.5, 0.0, 1.0);
+  p = mix(scatter, p, k * k * (3.0 - 2.0 * k));
+
   vec4 world = modelMatrix * vec4(p, 1.0);
   vec4 clip = projectionMatrix * viewMatrix * world;
-  vec2 ndc = clip.xy / clip.w;
-  vec2 dm = (ndc - uMouse) * vec2(uAspect, 1.0);
-  float push = smoothstep(0.42, 0.0, length(dm));
-  vec3 center = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-  world.xyz += normalize(world.xyz - center) * push * 0.75;
+  vec2 dm = (clip.xy / clip.w - uMouse) * vec2(uAspect, 1.0);
+  float push = smoothstep(0.2, 0.0, length(dm));
+  world.xy += normalize(dm + 1e-5) * push * 0.18;
+  world.z += push * 0.35;
   vec4 mv = viewMatrix * world;
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = min((0.9 + aRand * 1.6) * uPR * (16.0 / max(-mv.z, 1.0)), 7.0 * uPR);
-  vA = (0.1 + 0.45 * aRand) * uShow;
-  vR = push;
+  gl_PointSize = min((1.4 + aRand * 1.4) * uPR * (16.0 / max(-mv.z, 1.0)), 6.0 * uPR);
+
+  // photo colour, with the dark areas tinted by the project accent so the silhouette still reads
+  vec3 lin = pow(aCol, vec3(2.2));
+  float l = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+  vCol = lin * 1.3 + uA * (0.1 + 0.3 * (1.0 - l));
+  // a slow scan line sweeping down the portrait
+  float scanY = uScanH * 0.5 - mod(t * 0.45, uScanH * 1.6);
+  vCol += uA * exp(-pow((position.y - scanY) * 7.0, 2.0)) * 0.6;
+  vCol = mix(vCol, vec3(1.0), push * 0.4);
+  vA = (0.32 + 0.5 * aRand) * uShow;
 }
 `;
 
-export const ORB_FRAG = /* glsl */ `
-uniform vec3 uA;
-varying float vA; varying float vR;
+export const PORTRAIT_FRAG = /* glsl */ `
+varying vec3 vCol; varying float vA;
 void main(){
   float d = length(gl_PointCoord - 0.5);
-  float a = smoothstep(0.5, 0.0, d);
-  vec3 col = mix(uA, vec3(1.0), 0.12 + vR * 0.5);
-  gl_FragColor = vec4(col, a * vA);
+  gl_FragColor = vec4(vCol, smoothstep(0.5, 0.05, d) * vA);
 }
 `;
 
