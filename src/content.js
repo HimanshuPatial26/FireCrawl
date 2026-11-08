@@ -1,23 +1,24 @@
 // All site copy lives here.
 //
 // Each entry in `projects` is one case study. `group` decides where it is listed:
-//   'work'     -> Past work (#work)
-//   'projects' -> Projects (#projects)
+//   'work'     -> Work (#work): the three flagship case studies
+//   'projects' -> Projects (#projects): Master's projects
 //
-// Fields
-//   slug      URL name (letters, digits, hyphens), used as #slug
-//   title     large display title
-//   company   shown in the eyebrow and the details list
-//   role, period, area
-//   summary   one or two sentences for the index and the page header
-//   metrics   key results as [value, label] pairs; the first one is also shown on the index
-//   body      paragraphs for the case study page
-//   visuals   labels for the three illustrations on the page
-//   style     generative artwork: 0 dunes, 1 orbits, 2 liquid, 3 grid, 4 aurora, 5 crystal
-//   seed      any number; changes the composition of the artwork
-//   colors    bg / a (accent) / b (secondary); tints the whole 3D scene for this entry
-//   cover     optional real media: { type: 'image' | 'video', src: './media/x.jpg' }
-//   media     optional per-illustration media (same shape as cover)
+// Case study fields
+//   slug       URL name (letters, digits, hyphens), used as #slug
+//   pillar     short label above the title (Payments, Growth, AI, ...)
+//   title      large display title
+//   company, role, period, year, area
+//   summary    one-line outcome for the index and the page header
+//   metrics    key results as [value, label]; the first one also shows on the index
+//   chapters   what was shipped: { title, text, metrics } - each chapter gets an illustration
+//   problem, insight, decisions, learnings
+//              optional story sections; they appear on the page only when filled in
+//   style      generative artwork: 0 dunes, 1 orbits, 2 liquid, 3 grid, 4 aurora, 5 crystal
+//   seed       any number; changes the composition of the artwork
+//   colors     bg / a (accent) / b (secondary); tints the whole 3D scene for this entry
+//   cover      optional real media for the wall and hero: { type: 'image' | 'video', src }
+//   media      optional real media per chapter illustration (same shape as cover)
 
 export const site = {
   name: 'Himanshu Patial',
@@ -30,13 +31,46 @@ export const site = {
   linkedin: 'https://www.linkedin.com/in/himanshu-patial-8164b6149/',
   resume: './himanshu-patial-resume.pdf',
   intro: 'Product manager for payments, growth and AI. I take features from 0 to 1 and through to adoption.',
+  proof: [
+    { value: '30%', label: 'of monthly recurring revenue from Autopay', slug: 'payments-autopay', pillar: 'Payments' },
+    { value: '+14%', label: 'bottom-funnel conversion from a WhatsApp purchase flow', slug: 'growth-conversion', pillar: 'Growth' },
+    { value: '₹4M', label: 'a month from AI-Convert, an AI conversion engine', slug: 'ai-products', pillar: 'AI' },
+  ],
+  homeFoot: '3 years at Classplus · Master of Global Business, SP Jain School of Global Management',
+
+  aboutLede:
+    'Three years at Classplus taking B2B and D2C features from 0 to 1 and through to adoption, across payments, conversion and AI.',
   about: [
     'Associate Product Manager with 3 years at Classplus, taking B2B (Classplus) and D2C (Testbook) features from 0 to 1 through adoption across payments, conversion and AI, working with business, engineering and design teams.',
     'Now completing a Master of Global Business in Dubai, and looking for APM, PM and AI PM roles in the UAE.',
   ],
+  howIWork: [
+    'Take features from 0 to 1 and through to adoption.',
+    'Work closely with business, engineering and design teams.',
+    'Deliver with Scrum and Kanban, test with A/B experiments and trace issues with root cause analysis.',
+    'Work hands-on with data in SQL, Redash, Tableau and Power BI.',
+  ],
   experience: [
-    { role: 'Associate Product Manager', org: 'Classplus', period: 'Aug 2022 – Aug 2025' },
-    { role: 'Deputy Lead, Customer Delight', org: 'Classplus', period: 'Apr 2020 – Jul 2022' },
+    {
+      role: 'Associate Product Manager',
+      org: 'Classplus',
+      period: 'Aug 2022 – Aug 2025',
+      points: [
+        { text: 'Payments: owned the vertical at 40,000+ daily transactions; Autopay grew to 30% of MRR.', slug: 'payments-autopay' },
+        { text: 'Growth: WhatsApp purchase flow (+14% conversion), onboarding overlay (+7%), CRM (+30% agent productivity).', slug: 'growth-conversion' },
+        { text: 'AI: AI-Convert (₹4M a month), AI Tutor with RAG, AI Call Analysis (+8–10% productivity).', slug: 'ai-products' },
+      ],
+    },
+    {
+      role: 'Deputy Lead, Customer Delight',
+      org: 'Classplus',
+      period: 'Apr 2020 – Jul 2022',
+      points: [
+        { text: 'Led a 16-agent support team, holding CSAT at 89–90% against an industry benchmark of 78–85%.' },
+        { text: 'Resolved 90% of tickets within 6 hours without CSAT slipping.' },
+        { text: 'Reworked support workflows, raising agent productivity 40%.' },
+      ],
+    },
   ],
   education: [
     {
@@ -60,10 +94,11 @@ export const site = {
 const APM = { company: 'Classplus', role: 'Associate Product Manager', period: 'Aug 2022 – Aug 2025', year: '2022–25' };
 
 export const projects = [
-  /* ------------------------------ Past work ------------------------------ */
+  /* --------------------------------- Work --------------------------------- */
   {
     group: 'work',
     slug: 'payments-autopay',
+    pillar: 'Payments',
     title: 'Payments & Autopay',
     ...APM,
     area: 'Payments',
@@ -71,175 +106,165 @@ export const projects = [
     seed: 0.21,
     colors: { bg: '#04070d', a: '#6fa8ff', b: '#1c2f66' },
     summary:
-      'Owned the payments vertical at 40,000+ daily transactions. Rebuilt the payment journey with WhatsApp recovery flows and launched Autopay.',
+      'Owned payments at 40,000+ daily transactions, rebuilt the payment journey and launched Autopay, which grew to 30% of monthly recurring revenue.',
     metrics: [
       ['40,000+', 'daily transactions'],
       ['+10–15%', 'successful payments'],
       ['30%', 'of monthly recurring revenue via Autopay'],
     ],
-    body: [
-      'I owned the payments vertical at Classplus, which handled more than 40,000 transactions a day at an 85% success rate.',
-      'I rebuilt the in-app payment journey and added WhatsApp recovery flows, which lifted successful payments by 10–15%. I also launched Autopay, which grew to 30% of monthly recurring revenue.',
+    chapters: [
+      {
+        title: 'The payments vertical',
+        text: 'I owned the payments vertical at Classplus, handling more than 40,000 transactions a day at an 85% success rate.',
+        metrics: [
+          ['40,000+', 'transactions a day'],
+          ['85%', 'success rate'],
+        ],
+      },
+      {
+        title: 'Payment journey and WhatsApp recovery',
+        text: 'I rebuilt the in-app payment journey and added WhatsApp recovery flows, which lifted successful payments by 10–15%.',
+        metrics: [['+10–15%', 'successful payments']],
+      },
+      {
+        title: 'Autopay',
+        text: 'I launched Autopay, which grew to 30% of monthly recurring revenue.',
+        metrics: [['30%', 'of monthly recurring revenue']],
+      },
     ],
-    visuals: ['Payment journey', 'WhatsApp recovery', 'Autopay'],
+    problem: '',
+    insight: '',
+    decisions: '',
+    learnings: '',
   },
   {
     group: 'work',
-    slug: 'ctwa-purchase-flow',
-    title: 'CTWA Purchase Flow',
+    slug: 'growth-conversion',
+    pillar: 'Growth',
+    title: 'Growth & Conversion',
     ...APM,
-    area: 'Growth',
+    area: 'Growth · Conversion · Sales',
     style: 2,
     seed: 0.47,
     colors: { bg: '#030a08', a: '#4fe0a0', b: '#0f4a3a' },
-    summary: 'A WhatsApp chatbot purchase flow that cut purchase steps and raised bottom-funnel conversion 14%.',
+    summary:
+      'Shortened the path to purchase with a WhatsApp purchase flow and an onboarding overlay, and gave sales teams a CRM with lead scoring.',
     metrics: [
       ['+14%', 'bottom-funnel conversion'],
       ['3x', 'ROI reached by clients'],
+      ['+7%', 'conversion from onboarding'],
+      ['+30%', 'agent productivity'],
     ],
-    body: [
-      'I built a purchase flow inside a WhatsApp chatbot that cut the number of steps needed to buy.',
-      'It raised bottom-funnel conversion by 14% and helped clients reach 3x return on investment.',
+    chapters: [
+      {
+        title: 'CTWA purchase flow',
+        text: 'I built a WhatsApp chatbot purchase flow that cut the steps needed to buy. It raised bottom-funnel conversion by 14% and helped clients reach 3x ROI.',
+        metrics: [
+          ['+14%', 'bottom-funnel conversion'],
+          ['3x', 'client ROI'],
+        ],
+      },
+      {
+        title: 'Super Coaching onboarding',
+        text: 'I shipped an in-app onboarding overlay for a high-value segment, which lifted conversion by 7%.',
+        metrics: [['+7%', 'conversion']],
+      },
+      {
+        title: 'CRM and lead management',
+        text: 'I co-built an internal and client-facing CRM with an auto-dialer, raising agent productivity by 30% and sales team productivity by 8%. I added lead scoring that matched each lead to a product.',
+        metrics: [
+          ['+30%', 'agent productivity'],
+          ['+8%', 'sales team productivity'],
+        ],
+      },
     ],
-    visuals: ['Chat purchase flow', 'Fewer steps to buy', 'Client ROI'],
+    problem: '',
+    insight: '',
+    decisions: '',
+    learnings: '',
   },
   {
     group: 'work',
-    slug: 'ai-convert',
-    title: 'AI-Convert',
+    slug: 'ai-products',
+    pillar: 'AI',
+    title: 'AI Products',
     ...APM,
-    area: 'AI · Growth',
+    area: 'AI · LLM · RAG',
     style: 1,
     seed: 0.63,
-    colors: { bg: '#0a0705', a: '#ffb45c', b: '#6a3a12' },
-    summary: 'An activity-triggered conversion engine for B2B clients, generating ₹4M (~US $50K) a month.',
-    metrics: [['₹4M', 'a month (~US $50K)']],
-    body: [
-      'I launched AI-Convert, a conversion engine for Classplus B2B clients that is triggered by user activity.',
-      'The engine generates ₹4M (about US $50K) a month.',
-    ],
-    visuals: ['Activity triggers', 'Conversion engine', 'Monthly revenue'],
-  },
-  {
-    group: 'work',
-    slug: 'ai-tutor',
-    title: 'AI Tutor',
-    ...APM,
-    area: 'AI',
-    style: 5,
-    seed: 0.58,
     colors: { bg: '#08060d', a: '#c39bff', b: '#3b2370' },
-    summary: 'Led development of Doubt Mate, an AI tutor chatbot that grounds its answers in course material.',
-    metrics: [['RAG', 'answers grounded in course material']],
-    body: [
-      'I led development of Doubt Mate, an AI tutor chatbot for students.',
-      'I defined the requirements and user flows, and a retrieval-augmented generation (RAG) approach that grounded answers in course material to improve accuracy.',
-    ],
-    visuals: ['Doubt Mate', 'Retrieval from course material', 'Grounded answers'],
-  },
-  {
-    group: 'work',
-    slug: 'ai-call-analysis',
-    title: 'AI Call Analysis',
-    ...APM,
-    area: 'AI',
-    style: 4,
-    seed: 0.29,
-    colors: { bg: '#030a0d', a: '#5fe3ff', b: '#124a5c' },
-    summary: 'Automated the quality team’s manual call reviews and gave leadership insight into lead quality.',
-    metrics: [['+8–10%', 'team productivity']],
-    body: [
-      'I built a call-analysis tool that automated the quality team’s manual call reviews.',
-      'It gave leadership insight into lead quality so sales effort could be redirected, and lifted team productivity by 8–10%.',
-    ],
-    visuals: ['Call reviews', 'Lead-quality insight', 'Sales focus'],
-  },
-  {
-    group: 'work',
-    slug: 'crm-lead-management',
-    title: 'CRM & Lead Management',
-    ...APM,
-    area: 'Sales tools',
-    style: 3,
-    seed: 0.84,
-    colors: { bg: '#070707', a: '#ffd65a', b: '#4b3c12' },
-    summary: 'Co-built an internal and client-facing CRM with an auto-dialer and lead scoring.',
+    summary:
+      'Three AI products: a conversion engine generating ₹4M a month, an AI tutor grounded in course material, and automated call analysis for sales quality.',
     metrics: [
-      ['+30%', 'agent productivity'],
-      ['+8%', 'sales team productivity'],
+      ['₹4M', 'a month from AI-Convert (~US $50K)'],
+      ['RAG', 'AI tutor grounded in course material'],
+      ['+8–10%', 'team productivity from call analysis'],
     ],
-    body: [
-      'I co-built a CRM used both internally and by clients, with a built-in auto-dialer.',
-      'It raised agent productivity by 30% and sales team productivity by 8%. I also added lead scoring that matched each lead to a product.',
+    chapters: [
+      {
+        title: 'AI-Convert',
+        text: 'I launched an activity-triggered conversion engine for B2B clients that generates ₹4M (about US $50K) a month.',
+        metrics: [['₹4M', 'a month (~US $50K)']],
+      },
+      {
+        title: 'AI Tutor (Doubt Mate)',
+        text: 'I led development of an AI tutor chatbot: the requirements, the user flows and a retrieval-augmented generation (RAG) approach that grounded answers in course material to improve accuracy.',
+        metrics: [],
+      },
+      {
+        title: 'AI Call Analysis',
+        text: 'I built a call-analysis tool that automated the quality team’s manual call reviews and gave leadership insight into lead quality to redirect sales effort, lifting team productivity by 8–10%.',
+        metrics: [['+8–10%', 'team productivity']],
+      },
     ],
-    visuals: ['CRM', 'Auto-dialer', 'Lead scoring'],
-  },
-  {
-    group: 'work',
-    slug: 'super-coaching-onboarding',
-    title: 'Super Coaching Onboarding',
-    ...APM,
-    area: 'Growth',
-    style: 2,
-    seed: 0.93,
-    colors: { bg: '#0d0606', a: '#ff7a6b', b: '#5c1c1a' },
-    summary: 'An in-app onboarding overlay for a high-value segment that lifted conversion 7%.',
-    metrics: [['+7%', 'conversion']],
-    body: ['I shipped an in-app onboarding overlay for a high-value segment, which lifted conversion by 7%.'],
-    visuals: ['Onboarding overlay', 'High-value segment', 'Conversion'],
-  },
-  {
-    group: 'work',
-    slug: 'customer-delight',
-    title: 'Customer Delight',
-    company: 'Classplus',
-    role: 'Deputy Lead, Customer Delight',
-    period: 'Apr 2020 – Jul 2022',
-    year: '2020–22',
-    area: 'Support operations',
-    style: 4,
-    seed: 0.71,
-    colors: { bg: '#0c050a', a: '#ff86c5', b: '#5d1b45' },
-    summary: 'Led a 16-agent support team, holding CSAT at 89–90% against an industry benchmark of 78–85%.',
-    metrics: [
-      ['89–90%', 'CSAT, against a 78–85% benchmark'],
-      ['90%', 'of tickets resolved within 6 hours'],
-      ['+40%', 'agent productivity'],
-    ],
-    body: [
-      'As Deputy Lead of Customer Delight, I led a 16-agent support team and held CSAT at 89–90%, against an industry benchmark of 78–85%.',
-      'We resolved 90% of tickets within 6 hours without CSAT slipping, and I reworked the support workflows, raising agent productivity by 40%.',
-    ],
-    visuals: ['Support team', 'Resolution speed', 'Workflows'],
+    problem: '',
+    insight: '',
+    decisions: '',
+    learnings: '',
   },
 
-  /* ------------------------------ Projects ------------------------------- */
+  /* ------------------------------- Projects ------------------------------- */
   {
     group: 'projects',
     slug: 'fintech-adoption',
+    pillar: 'Research',
     title: 'FinTech Adoption',
     company: 'SP Jain School of Global Management',
     role: 'Master’s research project',
     period: 'Jan – Apr 2026',
     year: '2026',
     area: 'Research · Go-to-market',
-    style: 1,
+    style: 5,
     seed: 0.36,
     colors: { bg: '#04070c', a: '#bfe3ff', b: '#2a4f7a' },
-    summary: 'FinTech app adoption in India and Dubai: a 71-person survey modelled with PLS-SEM, turned into go-to-market recommendations.',
+    summary:
+      'What drives FinTech app adoption in India and Dubai: a 71-person survey modelled with PLS-SEM and turned into go-to-market recommendations.',
     metrics: [
       ['71', 'survey respondents'],
       ['96%', 'of adoption-intention variance explained'],
     ],
-    body: [
-      'A Master’s research project comparing FinTech app adoption in India and Dubai. I surveyed 71 respondents and modelled the results in SmartPLS 4 using PLS-SEM.',
-      'The model explained 96% of the variance in adoption intention, and I turned the main drivers into go-to-market recommendations.',
+    chapters: [
+      {
+        title: 'Survey',
+        text: 'I surveyed 71 respondents on FinTech app adoption in India and Dubai.',
+        metrics: [['71', 'respondents']],
+      },
+      {
+        title: 'Model',
+        text: 'I modelled the results in SmartPLS 4 using PLS-SEM. The model explained 96% of the variance in adoption intention.',
+        metrics: [['96%', 'variance explained']],
+      },
+      {
+        title: 'Go-to-market',
+        text: 'I turned the main adoption drivers into go-to-market recommendations.',
+        metrics: [],
+      },
     ],
-    visuals: ['India vs Dubai', 'PLS-SEM model', 'Go-to-market drivers'],
   },
   {
     group: 'projects',
     slug: 'rebel-foods-behrouz',
+    pillar: 'Strategy',
     title: 'Behrouz Biryani',
     company: 'Rebel Foods, Dubai',
     role: 'Master’s strategy project',
@@ -249,12 +274,25 @@ export const projects = [
     style: 0,
     seed: 0.13,
     colors: { bg: '#0d0806', a: '#ffb347', b: '#7a3a12' },
-    summary: 'Benchmarked Behrouz Biryani against UAE delivery rivals and recommended changes to positioning, pricing and channel mix.',
-    metrics: [['3', 'frameworks: PESTLE, CAGE, Five Forces']],
-    body: [
-      'A Master’s project benchmarking Behrouz Biryani, a Rebel Foods brand, against delivery rivals in the UAE.',
-      'I used PESTLE, CAGE and Porter’s Five Forces, and recommended changes to the brand’s positioning, pricing and channel mix.',
+    summary:
+      'Benchmarked Behrouz Biryani against UAE delivery rivals and recommended changes to positioning, pricing and channel mix.',
+    metrics: [],
+    chapters: [
+      {
+        title: 'Market benchmark',
+        text: 'I benchmarked Behrouz Biryani, a Rebel Foods brand, against delivery rivals in the UAE.',
+        metrics: [],
+      },
+      {
+        title: 'Frameworks',
+        text: 'I analysed the market with PESTLE, CAGE and Porter’s Five Forces.',
+        metrics: [],
+      },
+      {
+        title: 'Recommendations',
+        text: 'I recommended changes to the brand’s positioning, pricing and channel mix.',
+        metrics: [],
+      },
     ],
-    visuals: ['UAE delivery market', 'Competitive benchmark', 'Positioning and pricing'],
   },
 ];

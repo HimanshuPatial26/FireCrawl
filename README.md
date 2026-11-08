@@ -2,9 +2,10 @@
 
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
-- **Past work** (`#work`): case studies from Classplus, from Payments & Autopay to Customer Delight.
+- **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
+- **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
-- **About** (`#about`): profile, experience, education, skills, contact, LinkedIn and the resume PDF.
+- **About** (`#about`): profile, how I work, experience (including Customer Delight), education, skills and contact.
 
 Case studies sit on an arc of louver slats that flip in a staggered wave, open around the cursor and flatten
 into the hero image of each page. The artwork is generated at runtime, so no confidential product screens are shown.
@@ -45,9 +46,11 @@ Any other static host (Vercel, Netlify, Cloudflare Pages) works too: build comma
 All copy lives in `src/content.js`:
 
 - `site`: name, role, availability, email, LinkedIn, resume path, profile, experience, education and skills.
-- `projects`: one entry per case study. `group: 'work'` lists it under Past work, `group: 'projects'` under Projects.
-  `metrics` are the key results (the first one also shows on the index). `colors` tints the whole 3D scene,
-  and `style` (0 to 5) with `seed` choose the generative artwork.
+- `projects`: one entry per case study. `group: 'work'` lists it under Work, `group: 'projects'` under Projects.
+  `metrics` are the key results (the first one also shows on the index). `chapters` are the features shipped,
+  each with its own illustration. `problem`, `insight`, `decisions` and `learnings` are optional story sections
+  that appear on the page as soon as they are filled in. `colors` tints the whole 3D scene, and `style` (0 to 5)
+  with `seed` choose the generative artwork.
 
 The resume download is `public/himanshu-patial-resume.pdf`; replace that file to update it.
 
@@ -86,7 +89,7 @@ This rewrites `src/gl/portrait-data.js`.
 | Router, views, preloader, cursor, input | `src/main.js` |
 | Layout and type | `src/style.css` |
 
-Interaction: scroll, drag or use the arrow keys on the index; Enter opens the current case study; Escape goes back.
+Interaction: scroll, drag or use the arrow keys on Work and Projects; Enter opens the current case study; Escape goes one level up.
 Scrolling to the end of a case study pulls you into the next one in the same section.
 
 Accessibility: keyboard navigation, visible focus, screen-reader announcements for the current project,

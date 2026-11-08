@@ -16,8 +16,8 @@ const D = (s) => (reduced ? 0.001 : s);
 const pad = (n) => String(n).padStart(2, '0');
 // Two collections share one gallery: past work and Master's projects. Navigation stays inside a collection.
 const GROUPS = {
-  work: { label: 'Past work', hash: 'work', back: 'All past work', next: 'Next case study', open: 'Open case study' },
-  projects: { label: 'Projects', hash: 'projects', back: 'All projects', next: 'Next project', open: 'Open project' },
+  work: { label: 'Work', hash: 'work', back: 'All work', next: 'Next case study', open: 'Open case study', chapters: 'What I shipped' },
+  projects: { label: 'Projects', hash: 'projects', back: 'All projects', next: 'Next project', open: 'Open project', chapters: 'What I did' },
 };
 const groupOf = (i) => projects[i].group || 'work';
 const members = (g) => projects.reduce((acc, p, i) => ((p.group || 'work') === g ? (acc.push(i), acc) : acc), []);
@@ -60,7 +60,7 @@ const setIndex = (i) => {
 /* ------------------------------------------------------------------ */
 function buildHud() {
   $('#hud').innerHTML = `
-    <a class="hud-brand" href="#work" aria-label="${esc(site.name)}, back to past work">
+    <a class="hud-brand" href="#home" aria-label="${esc(site.name)}, home">
       <span class="hud-name">${esc(site.name)}</span>
       <span class="hud-role">${esc(site.role)} · ${esc(site.focus)}</span>
     </a>
@@ -69,7 +69,7 @@ function buildHud() {
       <span class="readout" aria-hidden="true"></span>
     </div>
     <nav class="hud-nav" aria-label="Main">
-      <a href="#work" data-nav="work"><span class="nl-long">Past work</span><span class="nl-short">Work</span></a>
+      <a href="#work" data-nav="work">Work</a>
       <a href="#projects" data-nav="projects">Projects</a>
       <a href="#about" data-nav="about">About</a>
       <a class="hud-cv" href="${esc(site.resume)}" download>Resume</a>
@@ -81,7 +81,7 @@ function buildHud() {
 
 function setNav(route) {
   const key =
-    route.name === 'about' ? 'about' : route.name === 'work' ? route.group : route.name === 'project' ? groupOf(route.index) : 'work';
+    route.name === 'work' ? route.group : route.name === 'project' ? groupOf(route.index) : route.name;
   $$('[data-nav]').forEach((a) => (a.dataset.nav === key ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
 }
 
@@ -330,7 +330,7 @@ async function start(withSound) {
     .to('#pre', { opacity: 0, duration: D(0.6), ease: 'power2.out' }, D(0.45))
     .add(() => $('#pre').remove());
   stage?.intro();
-  gsap.fromTo('.hud > *', { opacity: 0, y: -12 }, { opacity: 1, y: 0, duration: D(1.2), stagger: 0.08, delay: D(0.6), ease: 'expo.out' });
+  gsap.fromTo('.hud > *', { opacity: 0, y: -12 }, { opacity: 1, y: 0, duration: D(1.2), stagger: 0.08, delay: D(0.6), ease: 'expo.out', clearProps: 'opacity,transform' });
   app.started = true;
   await wait(reduced ? 0 : 450);
   navigate();
@@ -341,7 +341,8 @@ async function start(withSound) {
 /* ------------------------------------------------------------------ */
 function parseRoute() {
   const h = decodeURIComponent(location.hash.slice(1));
-  if (!h || h === 'work') return { name: 'work', group: 'work' };
+  if (!h || h === 'home') return { name: 'home' };
+  if (h === 'work') return { name: 'work', group: 'work' };
   if (h === 'projects') return { name: 'work', group: 'projects' };
   if (h === 'about') return { name: 'about' };
   const i = projects.findIndex((p) => p.slug === h);
@@ -411,10 +412,82 @@ async function leave(prev, next) {
 
 async function enter(route, prev) {
   root.classList.toggle('is-work', route.name === 'work');
+  root.classList.toggle('is-home', route.name === 'home');
+  if (route.name === 'home') return enterHome(prev);
   if (route.name === 'work') return enterWork(prev, route);
   if (route.name === 'project') return enterProject(route.index, prev);
   if (route.name === 'about') return enterAbout();
   return enterLost();
+}
+
+/* ------------------------------------------------------------------ */
+/* Home                                                                */
+/* ------------------------------------------------------------------ */
+function renderHome() {
+  const proof = site.proof
+    .map(
+      (p) =>
+        `<li data-slug="${p.slug}"><a href="#${p.slug}"><span class="hp-v">${esc(p.value)}</span><span class="hp-l">${esc(p.label)}</span><span class="hp-src">${esc(p.pillar)} case study <span aria-hidden="true">→</span></span></a></li>`
+    )
+    .join('');
+  view.innerHTML = `
+    <section class="home" aria-labelledby="home-name">
+      <p class="h-eyebrow">${esc(site.role)} · ${esc(site.focus)}</p>
+      <h1 class="h-name" id="home-name">${esc(site.name)}</h1>
+      <p class="h-intro">${esc(site.intro)}</p>
+      <p class="h-status"><span class="dot" aria-hidden="true"></span>${esc(site.availability)} · ${esc(site.location)}</p>
+      <ul class="h-proof" aria-label="Highlights">${proof}</ul>
+      <div class="h-actions">
+        <a class="btn btn--solid" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">View work</span><span class="btn-arrow" aria-hidden="true">→</span></a>
+        <a class="btn" href="${esc(site.resume)}" download><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Download resume</span><span class="btn-arrow" aria-hidden="true">↓</span></a>
+        <a class="btn" href="${esc(site.linkedin)}" target="_blank" rel="noopener"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">LinkedIn</span><span class="btn-arrow" aria-hidden="true">↗</span></a>
+      </div>
+      <p class="h-foot">${esc(site.homeFoot)}</p>
+    </section>`;
+}
+
+function markProof(i) {
+  const slug = projects[i]?.slug;
+  $$('.h-proof li').forEach((li) => li.classList.toggle('is-active', li.dataset.slug === slug));
+}
+
+async function enterHome(prev) {
+  renderHome();
+  unlockScroll();
+  document.title = `${site.name} · ${site.role}`;
+  live.textContent = `${site.name}, ${site.role}. ${site.availability}.`;
+  let current = stage && groupOf(stage.current) === 'work' ? stage.current : groupOf(app.index) === 'work' ? app.index : firstOf('work');
+  setIndex(current);
+  root.style.setProperty('--accent', projects[current].colors.a);
+  markProof(current);
+  if (stage) {
+    stage.heroEl = null;
+    if (stage.current !== current) {
+      if (prev) stage.crossTo(current, 0.9);
+      else stage.setProject(current);
+    }
+    stage.setMode('home', { duration: prev ? 1.8 : 2.8 });
+    // the wall cycles through the Work case studies while the visitor reads
+    if (!reduced) {
+      const timer = setInterval(() => {
+        if (app.route?.name !== 'home' || app.busy || document.hidden) return;
+        current = neighbor(current, 1);
+        setIndex(current);
+        root.style.setProperty('--accent', projects[current].colors.a);
+        markProof(current);
+        stage.flipTo(current, 1);
+      }, 6500);
+      app.cleanup.push(() => clearInterval(timer));
+    }
+  }
+  const name = splitChars($('.h-name'));
+  const intro = splitWords($('.h-intro'));
+  const tl = gsap.timeline({ delay: D(prev ? 0.5 : 0.9) });
+  tl.fromTo('.h-eyebrow', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: D(0.9), ease: 'expo.out' }, 0)
+    .fromTo(name, { yPercent: 110 }, { yPercent: 0, duration: D(1.3), stagger: 0.035, ease: 'expo.out' }, 0.05)
+    .fromTo(intro, { yPercent: 105 }, { yPercent: 0, duration: D(1.1), stagger: 0.02, ease: 'expo.out' }, 0.3)
+    .fromTo('.h-status, .h-proof li, .h-actions .btn, .h-foot', { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: D(1), stagger: 0.07, ease: 'expo.out' }, 0.5);
+  await wait(reduced ? 0 : 300);
 }
 
 /* ------------------------------------------------------------------ */
@@ -592,11 +665,27 @@ function renderProject(i) {
   const g = groupOf(i);
   const next = projects[neighbor(i, 1)];
   const meta = [['Company', p.company], ['Role', p.role], ['Period', p.period], ['Focus', p.area]].filter(([, v]) => v);
-  const caption = (k) => esc((p.visuals && p.visuals[k]) || `${p.title} ${k + 1}`);
-  const fig = (k, cls) =>
-    `<figure class="media ${cls}"><div class="media-box" data-variant="${k}"></div><figcaption><span>${pad(k + 1)}</span>${caption(k)}</figcaption></figure>`;
-  const metrics = (p.metrics || [])
-    .map(([v, l]) => `<li><span class="pm-v">${esc(v)}</span><span class="pm-l">${esc(l)}</span></li>`)
+  const chips = (list) =>
+    list && list.length ? `<ul class="ch-metrics">${list.map(([v, l]) => `<li><b>${esc(v)}</b><span>${esc(l)}</span></li>`).join('')}</ul>` : '';
+  const metrics = (p.metrics || []).map(([v, l]) => `<li><span class="pm-v">${esc(v)}</span><span class="pm-l">${esc(l)}</span></li>`).join('');
+  // optional story sections only render once they have been written in content.js
+  const story = (key, label) =>
+    p[key] && [].concat(p[key]).join('').trim()
+      ? `<section class="p-section"><h2 class="p-sec-title">${label}</h2>${[].concat(p[key]).map((t) => `<p>${esc(t)}</p>`).join('')}</section>`
+      : '';
+  const chapters = (p.chapters || [])
+    .map(
+      (c, k) => `
+        <section class="chapter${k % 2 ? ' chapter--flip' : ''}">
+          <div class="ch-text">
+            <p class="ch-n">${pad(k + 1)}</p>
+            <h3 class="ch-title">${esc(c.title)}</h3>
+            <p class="ch-copy">${esc(c.text)}</p>
+            ${chips(c.metrics)}
+          </div>
+          <figure class="media ch-media" aria-hidden="true"><div class="media-box" data-variant="${k}"></div></figure>
+        </section>`
+    )
     .join('');
   view.innerHTML = `
     <article class="project">
@@ -604,18 +693,20 @@ function renderProject(i) {
       <header class="p-head">
         <a class="p-back" href="#${GROUPS[g].hash}"><span aria-hidden="true">←</span> ${GROUPS[g].back}</a>
         <p class="p-count">${GROUPS[g].label} · ${pad(posIn(i) + 1)} / ${pad(members(g).length)}</p>
+        ${p.pillar ? `<p class="p-pillar">${esc(p.pillar)}</p>` : ''}
         <h1 class="p-title" style="--chars:${fitChars(p.title)}">${esc(p.title)}</h1>
         <p class="p-summary">${esc(p.summary)}</p>
         <dl class="p-meta">${meta.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
         ${metrics ? `<ul class="p-metrics" aria-label="Key results">${metrics}</ul>` : ''}
       </header>
-      <section class="p-body" aria-label="Details">
-        <p class="p-para">${esc(p.body[0])}</p>
-        ${fig(0, 'm-wide')}
-        ${p.body[1] ? `<p class="p-para p-para--right">${esc(p.body[1])}</p>` : ''}
-        ${fig(1, 'm-right')}
-        ${fig(2, 'm-left')}
-      </section>
+      <div class="p-body">
+        ${story('problem', 'Problem')}
+        ${story('insight', 'Insight')}
+        <h2 class="p-sec-title p-sec-title--chapters">${GROUPS[g].chapters}</h2>
+        ${chapters}
+        ${story('decisions', 'Decisions and trade-offs')}
+        ${story('learnings', 'What I learned')}
+      </div>
       <a class="p-next" href="#${next.slug}" aria-label="${GROUPS[g].next}: ${esc(next.title)}">
         <span class="pn-label">${GROUPS[g].next}</span>
         <span class="pn-media" aria-hidden="true"><span class="media-box" data-next></span></span>
@@ -664,7 +755,7 @@ async function enterProject(i, prev) {
   const tl = gsap.timeline({ delay: D(fromProject ? 0.4 : 0.9) });
   tl.fromTo(chars, { yPercent: 110 }, { yPercent: 0, duration: D(1.3), stagger: 0.04, ease: 'expo.out' }, 0)
     .fromTo(sumWords, { yPercent: 100 }, { yPercent: 0, duration: D(1), stagger: 0.012, ease: 'expo.out' }, 0.15)
-    .fromTo('.p-back, .p-count, .p-meta > div, .p-metrics li', { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: D(0.9), stagger: 0.06, ease: 'expo.out' }, 0.25);
+    .fromTo('.p-back, .p-count, .p-pillar, .p-meta > div, .p-metrics li', { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: D(0.9), stagger: 0.06, ease: 'expo.out' }, 0.25);
 
   setupProjectScroll(i);
   await wait(reduced ? 0 : 400);
@@ -688,7 +779,7 @@ function setupProjectScroll(i) {
       }),
     { rootMargin: '0px 0px -12% 0px' }
   );
-  $$('.p-para, .media figcaption, .pn-label').forEach((el) => {
+  $$('.p-section, .p-sec-title--chapters, .ch-text, .pn-label').forEach((el) => {
     if (!reduced) el.style.opacity = '0';
     io.observe(el);
   });
@@ -724,19 +815,27 @@ function setupProjectScroll(i) {
 function renderAbout() {
   const list = (rows) =>
     rows
-      .map((r) => `<li><span class="al-role">${esc(r.role)}</span><span class="al-org">${esc(r.org)}</span><span class="al-period">${esc(r.period)}</span></li>`)
+      .map(
+        (r) =>
+          `<li><span class="al-role">${esc(r.role)}</span><span class="al-org">${esc(r.org)}</span><span class="al-period">${esc(r.period)}</span>${
+            r.points
+              ? `<ul class="ae-points">${r.points.map((pt) => `<li>${pt.slug ? `<a href="#${pt.slug}">${esc(pt.text)}</a>` : esc(pt.text)}</li>`).join('')}</ul>`
+              : ''
+          }</li>`
+      )
       .join('');
   view.innerHTML = `
     <article class="about">
       <p class="a-eyebrow">About · ${esc(site.location)}</p>
-      <h1 class="a-lede">${esc(site.intro)}</h1>
+      <h1 class="a-lede">${esc(site.aboutLede)}</h1>
       <div class="a-actions">
         <a class="btn btn--solid" href="${esc(site.resume)}" download><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Download resume</span><span class="btn-arrow" aria-hidden="true">↓</span></a>
         <a class="btn" href="${esc(site.linkedin)}" target="_blank" rel="noopener"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">LinkedIn</span><span class="btn-arrow" aria-hidden="true">↗</span></a>
       </div>
       <div class="a-grid">
         <section class="a-col a-bio"><h2>Profile</h2>${site.about.map((t) => `<p>${esc(t)}</p>`).join('')}</section>
-        <section class="a-col"><h2>Experience</h2><ul class="a-list">${list(site.experience)}</ul></section>
+        <section class="a-col"><h2>How I work</h2><ul class="a-how">${site.howIWork.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>
+        <section class="a-col a-col--wide"><h2>Experience</h2><ul class="a-exp">${list(site.experience)}</ul></section>
         <section class="a-col"><h2>Education</h2><ul class="a-list">${list(site.education)}</ul></section>
         <section class="a-col"><h2>Skills</h2><dl class="a-skills">${site.skills
           .map((k) => `<div><dt>${esc(k.label)}</dt><dd>${k.items.map(esc).join(' · ')}</dd></div>`)
@@ -792,7 +891,7 @@ async function enterLost() {
       <p class="lost-code">404</p>
       <h1>Nothing at this address</h1>
       <p>The link may be mistyped, or the page has moved.</p>
-      <a class="btn" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Back to past work</span></a>
+      <a class="btn" href="#home"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Back to home</span></a>
     </section>`;
   lockScroll();
   document.title = `Not found · ${site.name}`;
@@ -937,19 +1036,22 @@ function setupInput() {
 
   addEventListener('keydown', (e) => {
     if (!app.started) return;
-    const r = app.route?.name;
-    if (r === 'work') {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        step(1);
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        step(-1);
-      } else if (e.key === 'Enter' && (document.activeElement === document.body || document.activeElement === view)) {
-        location.hash = projects[app.index].slug;
-      }
-    } else if (e.key === 'Escape') {
-      location.hash = r === 'project' ? GROUPS[groupOf(app.index)].hash : 'work';
+    // Escape goes one level up from where the visitor is heading, even mid-transition:
+    // case study -> its gallery, everything else -> home
+    if (e.key === 'Escape') {
+      const cur = parseRoute();
+      location.hash = cur.name === 'project' ? GROUPS[groupOf(cur.index)].hash : 'home';
+      return;
+    }
+    if (app.route?.name !== 'work') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      step(1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      step(-1);
+    } else if (e.key === 'Enter' && (document.activeElement === document.body || document.activeElement === view)) {
+      location.hash = projects[app.index].slug;
     }
   });
 }

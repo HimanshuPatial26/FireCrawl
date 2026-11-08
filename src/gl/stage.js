@@ -19,10 +19,12 @@ const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 
 // Scene states. Every value is tweened, so any state can blend into any other.
 const MODES = {
-  work: { hero: 0, about: 0, dim: 0, open: 1, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0 },
-  project: { hero: 1, about: 0, dim: 0.78, open: 1, arc: 0, gap: 0.035, mouseAmt: 0, glow: 0.5, orb: 0 },
-  about: { hero: 0, about: 1, dim: 0.45, open: 0, arc: 0.55, gap: 0.3, mouseAmt: 0, glow: 0.45, orb: 1 },
-  lost: { hero: 0, about: 1, dim: 0.58, open: 0, arc: 0.3, gap: 0.4, mouseAmt: 0, glow: 0.35, orb: 0 },
+  // home: wall to the right, centre closed and edges partly open so the backlight leaks through
+  home: { home: 1, hero: 0, about: 0, dim: 0.08, open: 0.62, arc: 0.9, gap: 0.24, mouseAmt: 0.8, glow: 1.15, orb: 0 },
+  work: { home: 0, hero: 0, about: 0, dim: 0, open: 1, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0 },
+  project: { home: 0, hero: 1, about: 0, dim: 0.78, open: 1, arc: 0, gap: 0.035, mouseAmt: 0, glow: 0.5, orb: 0 },
+  about: { home: 0, hero: 0, about: 1, dim: 0.45, open: 0, arc: 0.55, gap: 0.3, mouseAmt: 0, glow: 0.45, orb: 1 },
+  lost: { home: 0, hero: 0, about: 1, dim: 0.58, open: 0, arc: 0.3, gap: 0.4, mouseAmt: 0, glow: 0.35, orb: 0 },
 };
 
 export class Stage {
@@ -55,7 +57,7 @@ export class Stage {
     this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
 
     this.colors = { bg: new THREE.Color(), a: new THREE.Color(), b: new THREE.Color() };
-    this.state = { hero: 0, about: 0, dim: 0, fade: 1, open: 0, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0, fluid: reduced ? 0 : 1, camZ: 16 };
+    this.state = { home: 0, hero: 0, about: 0, dim: 0, fade: 1, open: 0, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0, fluid: reduced ? 0 : 1, camZ: 16 };
     this.trans = { flip: 0, cross: 0, dir: 1, active: false, target: -1 };
     this.pointer = { x: 0, y: 0, sx: 0, sy: 0, px: 0, py: 0, has: false };
     this.N = mobile ? 28 : 46;
@@ -528,7 +530,8 @@ export class Stage {
     const [w, h] = this.mobile ? [640, 400] : [896, 560];
     for (const it of items) {
       const p = this.projects[it.index];
-      const slot = this.makeSlot(it.index, it.variant, p.media && p.media[it.variant]);
+      // variant 0 is the cover; chapter illustrations are variants 1..n and map to media[0..n-1]
+      const slot = this.makeSlot(it.index, it.variant, it.variant > 0 && p.media ? p.media[it.variant - 1] : null);
       const rt = this.mediaPool.pop() || this.makeRT(w, h);
       const mat = new THREE.ShaderMaterial({
         vertexShader: S.MEDIA_VERT,
@@ -791,7 +794,10 @@ export class Stage {
     const about = this.mobile
       ? { x: 0, y: visH * 0.18, z: -4, sx: ws * 1.1, sy: ws * 1.1 }
       : { x: -visW * 0.08, y: visH * 0.05, z: -4.5, sx: ws * 1.25, sy: ws * 1.25 };
-    const blend = (key) => lerp(lerp(work[key], hero[key], st.hero), about[key], st.about);
+    const home = this.mobile
+      ? { x: 0, y: visH * 0.2, z: -1.5, sx: ws * 0.85, sy: ws * 0.85 }
+      : { x: visW * 0.25, y: visH * 0.03, z: -1.2, sx: ws * 0.9, sy: ws * 0.9 };
+    const blend = (key) => lerp(lerp(lerp(work[key], hero[key], st.hero), about[key], st.about), home[key], st.home);
     const g = this.group;
     g.position.set(blend('x'), blend('y'), blend('z'));
     g.scale.set(blend('sx'), blend('sy'), 1);
