@@ -71,8 +71,16 @@ Put the files in `public/media/` so Vite copies them into the build.
 Interaction: scroll, drag or use the arrow keys on the index; Enter opens the current project; Escape goes back.
 Scrolling to the end of a project pulls you into the next one.
 
-Accessibility and performance: keyboard navigation, visible focus, screen-reader announcements for the
-current project, `prefers-reduced-motion` support (crossfades instead of flips, no fluid, native scroll),
-and automatic resolution scaling when the frame rate drops.
+Accessibility: keyboard navigation, visible focus, screen-reader announcements for the current project,
+and `prefers-reduced-motion` support (crossfades instead of flips, no fluid, native scroll).
+
+Performance:
+
+- One clock drives GSAP, Lenis smooth scroll and the WebGL frame, so the page and the 3D scene never drift apart.
+- Page geometry is measured only when layout changes; scrolling never forces a layout read.
+- Procedural artwork and floor reflections refresh at half rate on alternating frames, so no single frame carries both.
+- Work nobody can see is skipped: the hero once scrolled away, reflections under a black floor, the fluid when the cursor is still.
+- Resolution starts inside a pixel budget, drops when frames are missed and climbs back after sustained headroom.
+- Add `?bench` to the URL to expose `window.__louver` and per-frame GPU timings (`__louver.stage.benchTimes`).
 
 Fonts: Big Shoulders Display, Hanken Grotesk and Martian Mono from Google Fonts (SIL Open Font License).

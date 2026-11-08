@@ -97,6 +97,12 @@ function updateSoundButton() {
 }
 
 function setupReadout() {
+  // darken the area behind the HUD once page content scrolls under it
+  let scrolled = false;
+  frameHooks.push(() => {
+    const next = !root.classList.contains('is-locked') && window.scrollY > 40;
+    if (next !== scrolled) root.classList.toggle('is-scrolled', (scrolled = next));
+  });
   const el = $('.readout');
   let acc = 0;
   let frames = 0;
@@ -142,13 +148,35 @@ function setupCursor() {
     last = t;
     if (t && t.classList.contains('media')) stage?.setMediaHover(t.querySelector('.media-box'), true);
   });
+  // magnetic controls: buttons lean towards the cursor and spring back when it leaves
+  if (finePointer && !reduced) {
+    let mag = null;
+    addEventListener(
+      'pointermove',
+      (e) => {
+        const t = e.target.closest?.('.btn, .hud-nav a, .sound');
+        if (mag && mag !== t) {
+          gsap.to(mag, { x: 0, y: 0, duration: 0.9, ease: 'elastic.out(1, 0.45)', overwrite: 'auto' });
+          mag = null;
+        }
+        if (!t || t.disabled) return;
+        mag = t;
+        const b = t.getBoundingClientRect();
+        const cx0 = b.left - gsap.getProperty(t, 'x') + b.width / 2;
+        const cy0 = b.top - gsap.getProperty(t, 'y') + b.height / 2;
+        gsap.to(t, { x: (e.clientX - cx0) * 0.2, y: (e.clientY - cy0) * 0.28, duration: 0.5, ease: 'power3.out', overwrite: 'auto' });
+      },
+      { passive: true }
+    );
+  }
   document.addEventListener('pointerout', (e) => {
     const t = e.target.closest('.media');
     if (t && !t.contains(e.relatedTarget)) stage?.setMediaHover(t.querySelector('.media-box'), false);
   });
-  frameHooks.push(() => {
-    cx += (x - cx) * 0.22;
-    cy += (y - cy) * 0.22;
+  frameHooks.push((dt) => {
+    const k = 1 - Math.exp(-dt * 16);
+    cx += (x - cx) * k;
+    cy += (y - cy) * k;
     c.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
     const onWork = app.route?.name === 'work' && !c.classList.contains('is-link');
     const text = drag.dir ? 'Release' : onWork ? 'Drag' : '';
@@ -194,6 +222,12 @@ async function boot() {
   buildPreloader();
   try {
     stage = new Stage($('#gl'), projects, { reduced, mobile });
+    if (new URLSearchParams(location.search).has('bench')) {
+      stage.bench = true;
+      stage.dpr = 1;
+      stage.resize();
+      window.__louver = { stage, app, get lenis() { return lenis; } };
+    }
   } catch (err) {
     console.warn('WebGL unavailable, running without the 3D stage.', err);
     root.classList.add('no-gl');
@@ -589,8 +623,10 @@ function setupProjectScroll(i) {
 
   const hook = () => {
     if (fired || !footer.isConnected) return;
-    const b = footer.getBoundingClientRect();
-    const p = Math.max(0, Math.min(1, (innerHeight - b.top) / b.height));
+    const b = stage ? stage.rect(footer) : footer.getBoundingClientRect();
+    const top = stage ? b.t : b.top;
+    const height = stage ? b.h : b.height;
+    const p = Math.max(0, Math.min(1, (innerHeight - top) / height));
     fill.style.transform = `scaleX(${p})`;
     ttl.style.transform = `scale(${0.82 + p * 0.18})`;
     stage?.setNextProgress(p);
@@ -685,19 +721,75 @@ async function enterLost() {
 const drag = { on: false, x0: 0, dir: 0, p: 0, target: -1, lastX: 0, lastT: 0, v: 0, ticks: 0 };
 
 function setupInput() {
-  let wheelT = 0;
+  // Wheel and trackpad scrub the flip continuously. A short flick or one mouse notch completes it;
+  // a tiny nudge springs back. Momentum after a completed flip is swallowed so one gesture = one project.
+  const wheel = { active: false, p: 0, target: 0, dir: 0, idx: -1, last: 0, lockUntil: 0, ticks: 0 };
   addEventListener(
     'wheel',
     (e) => {
-      if (app.route?.name !== 'work' || app.busy) return;
-      const d = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (app.route?.name !== 'work' || app.busy || drag.on) return;
       const now = performance.now();
-      if (Math.abs(d) < 8 || now - wheelT < 900 || app.flipping) return;
-      wheelT = now;
-      step(Math.sign(d));
+      if (now < wheel.lockUntil) {
+        wheel.lockUntil = now + 220;
+        return;
+      }
+      if (app.flipping && !wheel.active) return;
+      let d = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (e.deltaMode === 1) d *= 33;
+      if (!d) return;
+      wheel.last = now;
+      if (!wheel.active) {
+        Object.assign(wheel, { active: true, dir: Math.sign(d), p: 0, target: 0, ticks: 0 });
+        wheel.idx = wrapIndex(app.index + wheel.dir);
+        app.flipping = true;
+        stage?.scrubStart(wheel.idx, wheel.dir);
+      }
+      wheel.target = Math.min(1, wheel.target + (d * wheel.dir) / 520);
+      if (wheel.target < -0.04) {
+        // reversed before committing: scrub towards the other neighbour instead
+        wheel.dir *= -1;
+        wheel.idx = wrapIndex(app.index + wheel.dir);
+        wheel.target = -wheel.target;
+        wheel.p = 0;
+        stage?.scrubStart(wheel.idx, wheel.dir);
+      }
     },
     { passive: true }
   );
+  const finishWheel = async (commit) => {
+    const { idx, dir, p } = wheel;
+    wheel.active = false;
+    if (commit) {
+      app.index = idx;
+      sound.woosh(dir, 0.8);
+      sound.louvers(Math.max(0.4, (1 - p) * 1.6), Math.max(4, Math.round(26 * (1 - p))), dir);
+      workText(idx, dir);
+      wheel.lockUntil = performance.now() + 260;
+    }
+    await (stage ? stage.scrubEnd(commit) : wait(10));
+    app.flipping = false;
+    if (app.pending) {
+      const q = app.pending;
+      app.pending = null;
+      if (q.i !== app.index) goTo(q.i, q.dir);
+    }
+  };
+  frameHooks.push((dt) => {
+    if (!wheel.active) return;
+    if (app.route?.name !== 'work') {
+      finishWheel(false);
+      return;
+    }
+    wheel.p += (Math.max(0, wheel.target) - wheel.p) * (1 - Math.exp(-dt * 14));
+    stage?.scrubSet(wheel.p);
+    const t = Math.floor(wheel.p * 14);
+    if (t !== wheel.ticks) {
+      wheel.ticks = t;
+      sound.tick(wheel.p);
+    }
+    if (wheel.p > 0.97) finishWheel(true);
+    else if (performance.now() - wheel.last > 150) finishWheel(wheel.target > 0.12);
+  });
 
   addEventListener('pointerdown', (e) => {
     if (app.route?.name !== 'work' || app.busy || app.flipping || e.button > 0) return;
@@ -748,6 +840,7 @@ function setupInput() {
     if (commit) {
       app.index = target;
       sound.woosh(dir, 0.8);
+      sound.louvers(Math.max(0.4, (1 - drag.p) * 1.6), Math.max(4, Math.round(26 * (1 - drag.p))), dir);
       workText(target, dir);
     }
     await (stage ? stage.scrubEnd(commit) : wait(10));
@@ -778,25 +871,23 @@ function setupInput() {
 /* ------------------------------------------------------------------ */
 /* Frame loop                                                          */
 /* ------------------------------------------------------------------ */
+// One clock for everything: GSAP tweens, Lenis scroll, the WebGL frame and UI hooks advance
+// in the same tick, so the page and the 3D scene never drift a frame apart.
 function setupLoop() {
   if (!reduced) {
-    lenis = new Lenis({ lerp: 0.09, wheelMultiplier: 0.9, touchMultiplier: 1.4 });
+    lenis = new Lenis({ lerp: 0.1, wheelMultiplier: 1, touchMultiplier: 1.3 });
     lenis.stop();
   }
   root.classList.add('is-locked');
-  let last = performance.now();
-  const loop = (now) => {
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
-    lenis?.raf(now);
+  gsap.ticker.add((time, deltaMs) => {
+    const dt = Math.min(0.05, deltaMs / 1000);
+    lenis?.raf(time * 1000);
     if (stage) {
       stage.scrollVel = lenis ? lenis.velocity : 0;
       stage.update(dt);
     }
-    for (const f of frameHooks.slice()) f(dt);
-    requestAnimationFrame(loop);
-  };
-  requestAnimationFrame(loop);
+    for (let i = 0; i < frameHooks.length; i++) frameHooks[i](dt);
+  });
 }
 
 boot();

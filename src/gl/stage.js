@@ -4,7 +4,6 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { Fluid } from './fluid.js';
 import * as S from './shaders.js';
@@ -33,13 +32,19 @@ export class Stage {
 
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }));
     if (!r.capabilities.isWebGL2) throw new Error('WebGL2 is not available');
+    // Resolution starts inside a pixel budget; adapt() then moves it up or down with the frame rate.
     this.maxDpr = mobile ? 1.5 : 1.75;
-    this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
+    this.minDpr = mobile ? 0.6 : 0.75;
+    const native = Math.min(window.devicePixelRatio || 1, this.maxDpr);
+    const fit = Math.sqrt((mobile ? 1.5e6 : 3.2e6) / (innerWidth * innerHeight));
+    this.dpr = Math.max(this.minDpr, Math.min(native, Math.floor(fit * 8) / 8));
+    this.dprCeil = native;
+    this.vsync = 1 / 60;
+    this.calm = 0;
     r.setPixelRatio(this.dpr);
     r.setSize(innerWidth, innerHeight, false);
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.0;
+    r.toneMapping = THREE.NoToneMapping; // tone mapping and sRGB are applied in the final pass
     r.info.autoReset = false;
 
     this.camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 120);
@@ -60,6 +65,14 @@ export class Stage {
     this.heroRect = null;
     this.media = [];
     this.frameTimes = [];
+    this.frame = 0;
+    this.ripple = 0;
+    this.kick = 0;
+    this.fluidIdle = 0;
+    this.lastArtAspect = 0;
+    this.tracked = new Map();
+    this.mediaPool = [];
+    this.needsMeasure = true;
     this.adaptive = false;
     this.texCache = new Map();
 
@@ -79,6 +92,7 @@ export class Stage {
     this.setColorsFrom(this.slotA);
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    if (window.ResizeObserver) new ResizeObserver(() => (this.needsMeasure = true)).observe(document.body);
   }
 
   /* ---------------------------------------------------------------- */
@@ -134,7 +148,7 @@ export class Stage {
   }
 
   initArt() {
-    const [w, h] = this.mobile ? [960, 540] : [1440, 810];
+    const [w, h] = this.mobile ? [960, 540] : [1280, 720];
     this.rtA = this.makeRT(w, h);
     this.rtB = this.makeRT(w, h);
     this.artMat = new THREE.ShaderMaterial({
@@ -213,6 +227,8 @@ export class Stage {
         uMouseAmt: { value: 0 },
         uLift: { value: 0.55 },
         uCross: { value: 0 },
+        uUvShift: { value: new THREE.Vector2() },
+        uRipple: { value: 0 },
         uBg: { value: this.colors.bg },
         uA: { value: this.colors.a },
         uDim: { value: 0 },
@@ -265,6 +281,12 @@ export class Stage {
     u.uBg.value = this.colors.bg;
     u.uA.value = this.colors.a;
     this.scene.add(this.floor);
+    // reflections refresh at half rate and pause while the floor is hidden behind page content
+    const reflect = this.floor.onBeforeRender;
+    this.reflectNow = true;
+    this.floor.onBeforeRender = (...args) => {
+      if (this.reflectNow) reflect.apply(this.floor, args);
+    };
   }
 
   initDust() {
@@ -348,8 +370,9 @@ export class Stage {
     c.addPass(this.distort);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), this.mobile ? 0.6 : 0.7, 0.6, 0.78);
     c.addPass(this.bloom);
-    c.addPass(new OutputPass());
+    // tone mapping, sRGB, vignette, grain and fades in a single full-screen pass
     this.finalPass = new ShaderPass(S.FinalShader);
+    this.finalPass.material.toneMapped = false;
     c.addPass(this.finalPass);
   }
 
@@ -383,6 +406,8 @@ export class Stage {
   prepB(i) {
     this.slotB = this.makeSlot(i);
     this.trans.target = i;
+    this.renderArt(this.slotB, this.rtB, this.lastArtAspect || 16 / 9);
+    this.renderer.setRenderTarget(null);
   }
 
   commit() {
@@ -491,11 +516,11 @@ export class Stage {
   /* ---------------------------------------------------------------- */
   setMedia(items) {
     this.clearMedia();
-    const [w, h] = this.mobile ? [640, 400] : [1024, 640];
+    const [w, h] = this.mobile ? [640, 400] : [896, 560];
     for (const it of items) {
       const p = this.projects[it.index];
       const slot = this.makeSlot(it.index, it.variant, p.media && p.media[it.variant]);
-      const rt = this.makeRT(w, h);
+      const rt = this.mediaPool.pop() || this.makeRT(w, h);
       const mat = new THREE.ShaderMaterial({
         vertexShader: S.MEDIA_VERT,
         fragmentShader: S.MEDIA_FRAG,
@@ -509,13 +534,14 @@ export class Stage {
           uA: { value: slot.a },
           uSeed: { value: slot.seed },
           uHover: { value: 0 },
+          uPar: { value: 0 },
         },
       });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 24, 24), mat);
       mesh.frustumCulled = false;
       mesh.visible = false;
       this.overlay.add(mesh);
-      this.media.push({ el: it.el, kind: it.kind || 'media', slot, rt, mesh, mat, revealed: this.reduced });
+      this.media.push({ el: it.el, kind: it.kind || 'media', slot, rt, mesh, mat, revealed: this.reduced, seen: false });
     }
   }
 
@@ -534,32 +560,69 @@ export class Stage {
       this.overlay.remove(m.mesh);
       m.mesh.geometry.dispose();
       m.mat.dispose();
-      m.rt.dispose();
+      this.mediaPool.push(m.rt);
+      this.tracked.delete(m.el);
     }
     this.media = [];
   }
 
-  updateMedia() {
+  updateMedia(dt) {
     const vel = Math.max(-1, Math.min(1, this.scrollVel * 0.02));
-    for (const m of this.media) {
+    const k = 1 - Math.exp(-dt * 9);
+    for (let i = 0; i < this.media.length; i++) {
+      const m = this.media[i];
       if (!m.el.isConnected) {
         m.mesh.visible = false;
         continue;
       }
-      const b = m.el.getBoundingClientRect();
-      const vis = b.width > 0 && b.bottom > -40 && b.top < innerHeight + 40;
+      const b = this.rect(m.el);
+      const vis = b.w > 0 && b.t + b.h > -40 && b.t < innerHeight + 40;
       m.mesh.visible = vis;
       if (!vis) continue;
-      m.mesh.position.set(b.left + b.width / 2 - innerWidth / 2, -(b.top + b.height / 2 - innerHeight / 2), 0);
-      m.mesh.scale.set(b.width, b.height, 1);
+      m.mesh.position.set(b.l + b.w / 2 - innerWidth / 2, -(b.t + b.h / 2 - innerHeight / 2), 0);
+      m.mesh.scale.set(b.w, b.h, 1);
       const u = m.mat.uniforms;
-      u.uVel.value += (-vel * 0.06 - u.uVel.value) * 0.15;
-      this.renderArt(m.slot, m.rt, b.width / b.height, null);
-      if (!m.revealed && m.kind !== 'next' && b.top < innerHeight * 0.88) {
+      u.uVel.value += (-vel * 0.06 - u.uVel.value) * k;
+      u.uPar.value = Math.max(-1, Math.min(1, (b.t + b.h / 2 - innerHeight / 2) / innerHeight));
+      // the artwork moves slowly, so planes refresh at half rate, staggered so only one renders per frame
+      if (!m.seen || (this.frame + i) % 2 === 0) {
+        this.renderArt(m.slot, m.rt, b.w / b.h);
+        m.seen = true;
+      }
+      if (!m.revealed && m.kind !== 'next' && b.t < innerHeight * 0.88) {
         m.revealed = true;
         gsap.to(u.uReveal, { value: 1, duration: 1.8, ease: 'power3.inOut' });
       }
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Cached DOM geometry: measured on layout changes, offset by scrollY */
+  /* each frame, so syncing WebGL to the page never forces a layout.    */
+  /* ---------------------------------------------------------------- */
+  measureEl(el, t) {
+    const b = el.getBoundingClientRect();
+    t.l = b.left;
+    t.top = b.top + window.scrollY;
+    t.w = b.width;
+    t.h = b.height;
+  }
+
+  measureAll() {
+    for (const [el, t] of this.tracked) {
+      if (el.isConnected) this.measureEl(el, t);
+      else this.tracked.delete(el);
+    }
+  }
+
+  rect(el) {
+    let t = this.tracked.get(el);
+    if (!t) {
+      t = {};
+      this.measureEl(el, t);
+      this.tracked.set(el, t);
+    }
+    return { l: t.l, t: t.top - window.scrollY, w: t.w, h: t.h };
   }
 
   /* ---------------------------------------------------------------- */
@@ -601,18 +664,34 @@ export class Stage {
     this.dust.material.uniforms.uPR.value = this.dpr;
     this.orb.material.uniforms.uPR.value = this.dpr;
     this.orb.material.uniforms.uAspect.value = w / h;
+    this.needsMeasure = true;
   }
 
+  // Dynamic resolution: drop when frames are missed, creep back up after sustained headroom.
+  // Each downgrade lowers the ceiling a little so the scale settles instead of oscillating.
   adapt(dt) {
-    if (!this.adaptive || document.hidden) return;
-    this.frameTimes.push(dt);
-    if (this.frameTimes.length < 150) return;
-    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
-    this.frameTimes.length = 0;
-    if (avg > 1 / 42 && this.dpr > 0.75) {
-      this.dpr = Math.max(0.75, this.dpr - 0.25);
+    if (!this.adaptive || this.bench || document.hidden) return;
+    const ft = this.frameTimes;
+    ft.push(dt);
+    if (ft.length < 90) return;
+    const sorted = ft.slice().sort((a, b) => a - b);
+    ft.length = 0;
+    const med = sorted[45];
+    this.vsync = Math.min(this.vsync, Math.max(1 / 165, sorted[6]));
+    const slow = med > Math.max(this.vsync * 1.3, 1 / 55);
+    const fast = med < this.vsync * 1.1;
+    if (slow && this.dpr > this.minDpr) {
+      this.dpr = Math.max(this.minDpr, this.dpr - 0.25);
+      this.dprCeil = Math.max(this.minDpr, Math.min(this.dprCeil, this.dpr + 0.125));
+      this.calm = 0;
       this.resize();
-    }
+    } else if (fast && this.dpr < this.dprCeil) {
+      if (++this.calm >= 3) {
+        this.dpr = Math.min(this.dprCeil, this.dpr + 0.125);
+        this.calm = 0;
+        this.resize();
+      }
+    } else this.calm = 0;
   }
 
   // Compile every program during the preloader so no page pays a first-use shader stall.
@@ -633,6 +712,7 @@ export class Stage {
           uA: { value: this.colors.a },
           uSeed: { value: 0 },
           uHover: { value: 0 },
+          uPar: { value: 0 },
         },
       })
     );
@@ -654,12 +734,18 @@ export class Stage {
   }
 
   update(dt) {
+    const t0 = this.bench ? performance.now() : 0;
     const st = this.state;
     const tr = this.trans;
     const r = this.renderer;
     r.info.reset();
     this.time += dt;
+    this.frame++;
     this.adapt(dt);
+    if (this.needsMeasure) {
+      this.needsMeasure = false;
+      this.measureAll();
+    }
 
     const p = this.pointer;
     const k = 1 - Math.exp(-dt * 5);
@@ -680,10 +766,7 @@ export class Stage {
     const upp = visH / innerHeight;
     const ws = Math.min((visH * 0.6) / H, (visW * (this.mobile ? 0.94 : 0.72)) / W);
     const work = { x: 0, y: visH * (this.mobile ? 0.1 : 0.07), z: 0, sx: ws, sy: ws };
-    if (this.heroEl && this.heroEl.isConnected) {
-      const b = this.heroEl.getBoundingClientRect();
-      this.heroRect = { l: b.left, t: b.top, w: b.width, h: b.height };
-    }
+    if (this.heroEl && this.heroEl.isConnected) this.heroRect = this.rect(this.heroEl);
     let hero = work;
     if (this.heroRect) {
       const b = this.heroRect;
@@ -704,11 +787,18 @@ export class Stage {
     g.scale.set(blend('sx'), blend('sy'), 1);
     const artAspect = (W * g.scale.x) / (H * g.scale.y);
 
+    // camera: pointer parallax plus a small push in the direction of a flip
     const par = (1 - st.hero) * (this.reduced ? 0 : 1);
-    cam.position.set(p.sx * 0.5 * par, p.sy * 0.28 * par, st.camZ);
-    cam.lookAt(0, 0, 0);
+    const kickTarget = tr.active && !this.reduced ? Math.sin(Math.PI * Math.min(1, tr.flip)) * tr.dir : 0;
+    this.kick += (kickTarget - this.kick) * (1 - Math.exp(-dt * 5));
+    cam.position.set((p.sx * 0.5 + this.kick * 0.4) * par, p.sy * 0.28 * par, st.camZ + Math.abs(this.kick) * 0.5 * par);
+    cam.lookAt(this.kick * 0.12 * par, 0, 0);
 
     this.floor.position.y = work.y - (H * ws) / 2 - 0.25;
+
+    // hero louvers ripple with scroll speed
+    const rippleTarget = this.reduced ? 0 : Math.max(-0.35, Math.min(0.35, this.scrollVel * 0.01)) * st.hero;
+    this.ripple += (rippleTarget - this.ripple) * (1 - Math.exp(-dt * 6));
 
     const u = this.slatMat.uniforms;
     u.uTime.value = this.time;
@@ -721,6 +811,8 @@ export class Stage {
     u.uDim.value = st.dim * (1 - st.hero);
     u.uMouseX.value = ((p.sx * visW) / 2 - g.position.x) / g.scale.x;
     u.uMouseAmt.value = st.mouseAmt * (p.has ? 1 : 0) * (this.reduced ? 0 : 1);
+    u.uRipple.value = this.ripple;
+    u.uUvShift.value.set(-p.sx * 0.012 * (1 - st.hero), -p.sy * 0.01 * (1 - st.hero));
 
     const depth = st.camZ - g.position.z;
     const skyDist = st.camZ + 6;
@@ -732,9 +824,15 @@ export class Stage {
     su.uGlowC.value.set(g.position.x * proj, g.position.y * proj);
     su.uGlowR.value.set(Math.max(0.5, W * g.scale.x * 0.5 * proj), Math.max(0.5, H * g.scale.y * 0.5 * proj));
 
+    // skip work nobody can see: an off-screen hero, and reflections under a black floor
+    const heroHidden = st.hero > 0.999 && !tr.active && !!this.heroRect && this.heroRect.t + this.heroRect.h < -24;
+    this.slats.visible = !heroHidden;
+    const floorDim = Math.max(st.dim, st.hero * 0.92);
     const fu = this.floor.material.uniforms;
     fu.uTime.value = this.time;
-    fu.uDim.value = Math.max(st.dim, st.hero * 0.92);
+    fu.uDim.value = floorDim;
+    // reflections on odd frames, artwork on even frames, so the load is spread evenly
+    this.reflectNow = this.frame % 2 === 1 && !(heroHidden && floorDim > 0.9);
     this.dust.material.uniforms.uTime.value = this.time;
     this.dust.material.uniforms.uDim.value = st.dim;
 
@@ -742,26 +840,43 @@ export class Stage {
     this.orb.visible = st.orb > 0.001;
     ou.uTime.value = this.time;
     ou.uShow.value = st.orb;
-    ou.uLevel.value += (this.level - ou.uLevel.value) * 0.2;
+    ou.uLevel.value += (this.level - ou.uLevel.value) * (1 - Math.exp(-dt * 12));
     ou.uMouse.value.set(p.has ? p.sx : 9, p.has ? p.sy : 9);
     this.orb.scale.setScalar(this.mobile ? 0.62 : 1);
     if (this.mobile) this.orb.position.set(0, visH * 0.22, 0);
     else this.orb.position.set(visW * 0.24, 0.1, 0);
     this.orb.rotation.y = this.time * 0.05;
 
-    if (st.fluid > 0.01 && !this.reduced) this.fluid.update(Math.min(dt, 1 / 30));
+    // fluid: simulate while the pointer moves, then rest once the field has settled
+    if (st.fluid > 0.01 && !this.reduced) {
+      if (this.fluid.splats.length) this.fluidIdle = 0;
+      else this.fluidIdle += dt;
+      if (this.fluidIdle < 3) this.fluid.update(Math.min(dt, 1 / 30));
+      else if (!this.fluid.cleared) this.fluid.clear();
+    }
     this.distort.uniforms.tFluid.value = this.fluid.texture;
     this.distort.uniforms.uStrength.value = this.reduced ? 0 : st.fluid;
     const fp = this.finalPass.uniforms;
     fp.uTime.value = this.time;
     fp.uFade.value = st.fade;
 
-    const off = { x: -p.sx * 0.012 * (1 - st.hero), y: -p.sy * 0.01 * (1 - st.hero) };
-    this.renderArt(this.slotA, this.rtA, artAspect, off);
-    if (tr.active) this.renderArt(this.slotB, this.rtB, artAspect, off);
-    this.updateMedia();
+    // artwork animates slowly: refresh at half rate, alternating A and B during transitions,
+    // and every frame only while the wall is changing shape
+    if (!heroHidden) {
+      const reshaped = Math.abs(artAspect - this.lastArtAspect) > 0.002;
+      const even = this.frame % 2 === 0;
+      if (reshaped || even) this.renderArt(this.slotA, this.rtA, artAspect);
+      if (tr.active && (reshaped || !even)) this.renderArt(this.slotB, this.rtB, artAspect);
+      this.lastArtAspect = artAspect;
+    }
+    this.updateMedia(dt);
 
     r.setRenderTarget(null);
     this.composer.render(dt);
+    if (this.bench) {
+      const gl = r.getContext();
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, (this.benchPx ||= new Uint8Array(4)));
+      (this.benchTimes ||= []).push(performance.now() - t0);
+    }
   }
 }

@@ -213,6 +213,7 @@ attribute float aIndex;
 uniform float uCount; uniform float uWidth; uniform float uHeight; uniform float uDepth; uniform float uGap;
 uniform float uArc; uniform float uSpan; uniform float uFlip; uniform float uDir; uniform float uSpread;
 uniform float uOpen; uniform float uTime; uniform float uMouseX; uniform float uMouseAmt; uniform float uLift;
+uniform vec2 uUvShift; uniform float uRipple;
 varying vec2 vUvA; varying vec2 vUvB; varying float vFace; varying vec3 vN; varying vec3 vW; varying float vT;
 
 mat3 rotY(float a){ float c = cos(a); float s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
@@ -226,7 +227,11 @@ void main(){
   // staggered flip wave
   float order = uDir > 0.0 ? fi : 1.0 - fi;
   float tt = clamp(uFlip * (1.0 + uSpread) - order * uSpread, 0.0, 1.0);
-  float e = tt < 0.5 ? 4.0 * tt * tt * tt : 1.0 - pow(-2.0 * tt + 2.0, 3.0) / 2.0;
+  // ease-in-out with slight anticipation and overshoot, like a sprung louver
+  float c2 = 1.3725;
+  float a2 = 2.0 * tt;
+  float b2 = 2.0 * tt - 2.0;
+  float e = tt < 0.5 ? a2 * a2 * ((c2 + 1.0) * a2 - c2) * 0.5 : (b2 * b2 * ((c2 + 1.0) * b2 + c2) + 2.0) * 0.5;
   float flip = 3.14159265 * e * uDir;
 
   // opening from edge-on, centre first
@@ -245,8 +250,9 @@ void main(){
   float md = s - uMouseX;
   float tilt = uMouseAmt * exp(-md * md * 0.9) * 0.75;
   float breathe = 0.04 * sin(uTime * 0.6 + i * 0.37) * uArc;
+  float ripple = uRipple * sin(fi * 19.0 - uTime * 2.4);
 
-  float yaw = -th + flip + open + tilt + breathe;
+  float yaw = -th + flip + open + tilt + breathe + ripple;
   mat3 R = rotY(yaw);
   vec3 rp = R * p;
   float bump = sin(3.14159265 * tt);
@@ -259,8 +265,8 @@ void main(){
   vFace = normal.z;
   vT = bump;
   float hu = position.x * (1.0 - uGap);
-  vUvA = vec2((i + 0.5 + hu) / N, position.y + 0.5);
-  vUvB = vec2((i + 0.5 - hu) / N, position.y + 0.5);
+  vUvA = (vec2((i + 0.5 + hu) / N, position.y + 0.5) - 0.5) * 0.976 + 0.5 + uUvShift;
+  vUvB = (vec2((i + 0.5 - hu) / N, position.y + 0.5) - 0.5) * 0.976 + 0.5 + uUvShift;
   gl_Position = projectionMatrix * viewMatrix * world;
 }
 `;
@@ -441,14 +447,15 @@ void main(){
 `;
 
 export const MEDIA_FRAG = /* glsl */ `
-uniform sampler2D uTex; uniform float uReveal; uniform vec3 uA; uniform float uSeed; uniform float uHover;
+uniform sampler2D uTex; uniform float uReveal; uniform vec3 uA; uniform float uSeed; uniform float uHover; uniform float uPar;
 varying vec2 vUv;
 ${NOISE}
 void main(){
   float edge = uReveal * 1.25 - 0.12 + (vnoise(vec2(vUv.x * 6.0 + uSeed * 10.0, uSeed)) - 0.5) * 0.12;
   float vis = smoothstep(edge, edge - 0.015, vUv.y);
   if (vis <= 0.001) discard;
-  vec2 uv = (vUv - 0.5) / (1.0 + uHover * 0.06) + 0.5;
+  vec2 uv = (vUv - 0.5) / (1.08 + uHover * 0.06) + 0.5;
+  uv.y -= uPar * 0.035; // image drifts slower than its frame
   vec3 c = texture2D(uTex, uv).rgb;
   float line = smoothstep(0.02, 0.0, abs(vUv.y - edge)) * (1.0 - step(0.999, uReveal));
   c += uA * line * 2.5;
@@ -487,15 +494,31 @@ export const FinalShader = {
     uTime: { value: 0 },
     uFade: { value: 1 },
     uGrain: { value: 0.05 },
+    uExposure: { value: 1 },
     uRes: { value: new Vector2(1, 1) },
   },
   vertexShader: UV_VERT,
   fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse; uniform float uTime; uniform float uFade; uniform float uGrain; uniform vec2 uRes;
+    uniform sampler2D tDiffuse; uniform float uTime; uniform float uFade; uniform float uGrain; uniform float uExposure; uniform vec2 uRes;
     varying vec2 vUv;
     float rnd(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    // ACES filmic fit (the curve three.js uses), then the sRGB transfer function
+    vec3 lvRRT(vec3 v){
+      vec3 a = v * (v + 0.0245786) - 0.000090537;
+      vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+      return a / b;
+    }
+    vec3 lvACES(vec3 c){
+      const mat3 inM = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+      const mat3 outM = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+      c *= uExposure / 0.6;
+      return clamp(outM * lvRRT(inM * c), 0.0, 1.0);
+    }
+    vec3 lvSRGB(vec3 c){
+      return mix(pow(c, vec3(0.41666)) * 1.055 - vec3(0.055), c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308))));
+    }
     void main(){
-      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      vec3 c = lvSRGB(lvACES(texture2D(tDiffuse, vUv).rgb));
       vec2 v = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
       c *= mix(0.6, 1.0, smoothstep(1.05, 0.25, length(v)));
       c += (rnd(floor(vUv * uRes) + fract(uTime * 7.13) * 91.7) - 0.5) * uGrain;

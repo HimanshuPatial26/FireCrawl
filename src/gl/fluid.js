@@ -72,7 +72,7 @@ void main(){
 `;
 
 export class Fluid {
-  constructor(renderer, { res = 128, aspect = 1.6, iterations = 16 } = {}) {
+  constructor(renderer, { res = 128, aspect = 1.6, iterations = 12 } = {}) {
     this.r = renderer;
     this.res = res;
     this.iterations = iterations;
@@ -148,7 +148,24 @@ export class Fluid {
     pair[1] = t;
   }
 
+  // zero the field once motion has died out so the simulation can rest
+  clear() {
+    const r = this.r;
+    const prev = r.getRenderTarget();
+    const color = r.getClearColor(new THREE.Color());
+    const alpha = r.getClearAlpha();
+    r.setClearColor(0x000000, 0);
+    [...this.vel, ...this.pres].forEach((t) => {
+      r.setRenderTarget(t);
+      r.clear(true, false, false);
+    });
+    r.setClearColor(color, alpha);
+    r.setRenderTarget(prev);
+    this.cleared = true;
+  }
+
   update(dt) {
+    this.cleared = false;
     const prev = this.r.getRenderTarget();
     const a = this.mAdvect.uniforms;
     a.uVelocity.value = this.vel[0].texture;

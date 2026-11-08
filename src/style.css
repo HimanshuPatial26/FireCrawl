@@ -40,6 +40,12 @@ body {
   overflow-x: hidden;
 }
 
+/* Lenis smooth scroll */
+html.lenis,
+html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: hidden; }
+
 html.is-locked,
 html.is-locked body {
   overflow: hidden;
@@ -171,6 +177,17 @@ figcaption,
   pointer-events: none;
 }
 .hud > * { pointer-events: auto; }
+.hud::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 -48px;
+  z-index: -1;
+  background: linear-gradient(to bottom, var(--ink) 0%, rgba(6, 7, 10, 0.72) 45%, rgba(6, 7, 10, 0) 100%);
+  opacity: 0;
+  transition: opacity 0.5s var(--ease);
+  pointer-events: none;
+}
+.is-scrolled .hud::before { opacity: 1; }
 .hud-brand { display: grid; gap: 4px; text-decoration: none; justify-self: start; }
 .hud-name { font: 800 24px / 0.9 var(--font-display); text-transform: uppercase; letter-spacing: 0.01em; }
 .hud-role { color: var(--muted); }
@@ -482,7 +499,7 @@ figcaption span { color: var(--fg); }
 /* ------------------------------------------------------------------ */
 /* Cursor                                                              */
 /* ------------------------------------------------------------------ */
-.cursor { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; display: none; }
+.cursor { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; display: none; will-change: transform; }
 .has-cursor .cursor { display: block; }
 .has-cursor body,
 .has-cursor a,
