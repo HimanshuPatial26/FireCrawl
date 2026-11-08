@@ -39,10 +39,15 @@ vec3 lvToScene(vec3 lin){
 `;
 
 const VERT = /* glsl */ `
+uniform float uBend; uniform float uLen;
 varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 void main(){
   vUv = uv;
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  // the near half curls towards the camera, so the helix sweeps out of the screen rather than standing straight
+  vec3 pos = position;
+  float below = min(pos.y, 0.0) * uLen;
+  pos.z += uBend * below * below;
+  vec4 mv = modelViewMatrix * vec4(pos, 1.0);
   vViewZ = -mv.z;
   vec4 c = projectionMatrix * mv;
   vNdc = c.xy / c.w;
@@ -53,7 +58,7 @@ const HELIX_FRAG = /* glsl */ `
 uniform sampler2D uA; uniform sampler2D uB; uniform float uMix; uniform float uShiftA; uniform float uShiftB;
 uniform float uRepeat; uniform float uOpacity; uniform float uBg;
 uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
-uniform float uFocus; uniform float uBlur; uniform float uWidth;
+uniform float uFocus; uniform float uBlur; uniform float uWidth; uniform vec4 uSafe;
 varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 ${SHARED}
 // one frame pair at a point and mip level: frame A at its own vertical shift, frame B at its own, cross-faded
@@ -103,8 +108,18 @@ void main(){
   c *= mix(vec3(0.93, 0.955, 0.99), vec3(1.0), smoothstep(0.15, 0.85, g));
   // key out the flat backdrop: anything close to it shows the page's own backdrop instead
   float a = smoothstep(0.01, 0.05, max(abs(g - uBg), max(abs(c.r - uBg), abs(c.b - uBg)))) * uOpacity;
+  // where the out-of-focus near end passes in front of the text (uSafe: a screen rectangle), it turns
+  // translucent, so it still reads as coming out of the screen while the words stay legible
+  vec2 inX = smoothstep(uSafe.xy - 0.06, uSafe.xy + 0.06, vNdc) * smoothstep(uSafe.zw + 0.06, uSafe.zw - 0.06, vNdc);
+  a *= 1.0 - 0.65 * k * inX.x * inX.y;
   if (a < 0.002) discard;
+#ifdef DISPLAY_OUT
+  // drawn on its own layer above the page: straight to display values, with grain to match the page's
+  c += (fract(sin(dot(gl_FragCoord.xy + fract(uTime * 7.13) * 91.7, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.02;
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0) * a, a);
+#else
   gl_FragColor = vec4(lvToScene(lvDecode(clamp(c, 0.0, 1.0))) * a, a);
+#endif
 }`;
 
 // rows of the matrices in FinalShader (it lists them by column), inverted once here
@@ -138,9 +153,10 @@ async function loadFrame(renderer, url) {
   return t;
 }
 
-function material(fragmentShader, uniforms) {
+function material(fragmentShader, uniforms, defines = {}) {
   return new THREE.ShaderMaterial({
     uniforms,
+    defines,
     vertexShader: VERT,
     fragmentShader,
     transparent: true,
@@ -198,7 +214,8 @@ export class Helix {
     return helix;
   }
 
-  constructor(frames, { mobile = false, reduced = false }) {
+  // display: true when the helix draws on its own canvas (no scene tone curve to undo)
+  constructor(frames, { mobile = false, reduced = false, display = false }) {
     this.frames = frames;
     this.mobile = mobile;
     this.reduced = reduced;
@@ -227,8 +244,11 @@ export class Helix {
       uFocus: { value: 12 },
       uBlur: { value: 0.06 },
       uWidth: { value: 1 },
+      uBend: { value: 0 },
+      uLen: { value: 1 },
+      uSafe: { value: new THREE.Vector4(9, 9, 9, 9) }, // off until the stage sets it
     };
-    this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material(HELIX_FRAG, this.uniforms));
+    this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 160), material(HELIX_FRAG, this.uniforms, display ? { DISPLAY_OUT: '' } : {}));
     this.strip.frustumCulled = false;
     this.strip.renderOrder = 11;
     // group: position and lean on screen; tilt: leans the helix towards the camera, so one end comes out at you
@@ -242,11 +262,13 @@ export class Helix {
 
   // diameter: outer helix diameter in world units at its centre; length: how much of it to show along its axis;
   // tilt: how far it leans towards the camera (radians, lower end forward); focus: camera distance to the centre
-  layout(diameter, length, tilt, focus) {
+  layout(diameter, length, tilt, focus, bend = 0) {
     const s = diameter / META.outer;
     this.strip.scale.set(META.tile[0] * s, length, 1);
     this.tilt.rotation.x = -tilt;
     const u = this.uniforms;
+    u.uBend.value = bend;
+    u.uLen.value = length;
     u.uRepeat.value = length / (META.tile[1] * s);
     u.uWidth.value = META.tile[0] * s;
     u.uFocus.value = focus;

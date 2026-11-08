@@ -93,8 +93,8 @@ export class Stage {
     // Home helix placement (desktop / phone): size at its centre (fraction of the view height), lean on screen,
     // tilt towards the camera, centre position (fractions of the view), lens blur strength
     this.helixPose = mobile
-      ? { size: 0.2, lean: -0.95, tilt: 0.7, x: 0.16, y: 0.335, blur: 0.04, focus: -0.2 }
-      : { size: 0.42, lean: -0.48, tilt: 0.7, x: 0.27, y: 0, blur: 0.045, focus: -0.2 };
+      ? { size: 0.26, lean: -0.95, tilt: 0.85, x: 0.2, y: 0.3, blur: 0.07, focus: -0.4, bend: 0.03 }
+      : { size: 0.6, lean: -0.4, tilt: 0.85, x: 0.24, y: 0.14, blur: 0.085, focus: -0.4, bend: 0.035 };
     this.initPost();
     this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
 
@@ -674,6 +674,10 @@ export class Stage {
     this.camera.updateProjectionMatrix();
     this.composer.setPixelRatio(this.dpr);
     this.composer.setSize(w, h);
+    if (this.front) {
+      this.front.renderer.setPixelRatio(this.dpr);
+      this.front.renderer.setSize(w, h, false);
+    }
     Object.assign(this.ortho, { left: -w / 2, right: w / 2, top: h / 2, bottom: -h / 2 });
     this.ortho.updateProjectionMatrix();
     const rs = this.reflectSize();
@@ -718,8 +722,20 @@ export class Stage {
     if (this.helix) return;
     try {
       const { Helix } = await import('./helix.js');
-      this.helix = await Helix.create(this.renderer, { mobile: this.mobile, reduced: this.reduced });
-      this.scene.add(this.helix.group, this.helix.backdrop);
+      // the helix draws on its own transparent canvas above the page (its near end comes out in front of the
+      // text); the light studio backdrop stays in the main scene underneath
+      const canvas = document.getElementById('gl-front');
+      const fr = canvas && new THREE.WebGLRenderer({ canvas, alpha: true, premultipliedAlpha: true, antialias: false, powerPreference: 'high-performance' });
+      if (fr) {
+        fr.setClearColor(0x000000, 0);
+        fr.toneMapping = THREE.NoToneMapping;
+        fr.setPixelRatio(this.dpr);
+        fr.setSize(innerWidth, innerHeight, false);
+        this.front = { renderer: fr, scene: new THREE.Scene(), clear: true };
+      }
+      this.helix = await Helix.create(fr || this.renderer, { mobile: this.mobile, reduced: this.reduced, display: !!fr });
+      (this.front ? this.front.scene : this.scene).add(this.helix.group);
+      this.scene.add(this.helix.backdrop);
     } catch (err) {
       console.warn('Helix could not be loaded; Home shows the scene without it.', err);
     }
@@ -752,7 +768,12 @@ export class Stage {
     if (this.helix) this.helix.group.visible = true;
     const r = this.renderer;
     const compile = (scene, cam) => (r.compileAsync ? r.compileAsync(scene, cam) : Promise.resolve(r.compile(scene, cam)));
-    return Promise.all([compile(this.scene, this.camera), compile(this.overlay, this.ortho)])
+    const frontCompile = this.front
+      ? this.front.renderer.compileAsync
+        ? this.front.renderer.compileAsync(this.front.scene, this.camera)
+        : Promise.resolve(this.front.renderer.compile(this.front.scene, this.camera))
+      : null;
+    return Promise.all([compile(this.scene, this.camera), compile(this.overlay, this.ortho), frontCompile])
       .catch(() => {})
       .then(() => {
         this.state.orb = 0.0011; // render the orb, helix and media programs once while the screen is still black
@@ -911,8 +932,12 @@ export class Stage {
       // the pointer turns it a little in depth, for parallax
       hx.group.rotation.set(-p.sy * 0.04, p.sx * 0.07, pose.lean + p.sx * 0.02);
       hx.uniforms.uBlur.value = pose.blur;
+      // the text area, in screen coordinates: left column on desktop, everything below the band on phones
+      const safe = hx.uniforms.uSafe.value;
+      if (this.mobile) safe.set(-1.2, -1.2, 1.2, 1 - 2 * 0.36);
+      else safe.set(-1.2, -1.2, ((Math.min(innerWidth * 0.5, 820) + 44) / innerWidth) * 2 - 1, 1.2);
       // focus near the centre (pose.focus moves it along the depth, in helix diameters; + is further away)
-      hx.layout(diameter, length, pose.tilt, cam.position.z - hx.group.position.z + diameter * pose.focus);
+      hx.layout(diameter, length, pose.tilt, cam.position.z - hx.group.position.z + diameter * pose.focus, pose.bend);
       hx.update(dt, this.time, p, cam.aspect, k);
     }
     if (hx && hx.backdrop.visible) {
@@ -953,6 +978,14 @@ export class Stage {
 
     r.setRenderTarget(null);
     this.composer.render(dt);
+    const front = this.front;
+    if (front && this.helix?.group.visible) {
+      front.renderer.render(front.scene, this.camera);
+      front.clear = false;
+    } else if (front && !front.clear) {
+      front.renderer.clear();
+      front.clear = true;
+    }
     if (this.bench) {
       const gl = r.getContext();
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, (this.benchPx ||= new Uint8Array(4)));
