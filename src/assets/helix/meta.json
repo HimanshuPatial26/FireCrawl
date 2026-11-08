@@ -1,0 +1,19 @@
+{
+  "frames": 12,
+  "stepDegrees": 20.0,
+  "rungsPerTurn": 18,
+  "tile": [
+    2.902267,
+    5.8
+  ],
+  "outer": 2.46,
+  "pixels": [
+    1280,
+    2558
+  ],
+  "background": 0.94,
+  "mobilePixels": [
+    640,
+    1279
+  ]
+}

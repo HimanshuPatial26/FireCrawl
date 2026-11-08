@@ -89,18 +89,21 @@ pip install bpy==5.2.3 numpy
 ```
 
 ```bash
-python scripts/make-helix.py --strip helix-strip.png --drop helix-drop.png --dispersion --meta helix-meta.json
+python scripts/make-helix.py --frames helix-frames --drop helix-drop.png --dispersion
 ```
 
 ```bash
-python3 scripts/encode-helix.py helix-strip.png helix-drop.png --meta helix-meta.json
+python3 scripts/encode-helix.py helix-frames helix-drop.png
 ```
 
-The page spins the helix without a 3D model: a helix turning about its axis looks the same as one sliding along it,
-so the site scrolls one seamless render of two turns (`src/assets/helix-strip.webp`). Everything in the script is
-built to repeat along the axis so the strip has no seam. `--preview helix-preview.png` renders a perspective close-up
-for look development, and `--look '{"absorb": 3}'` overrides the studio or glass settings (see `LOOK` in the script).
-A full strip render with `--dispersion` takes about ten minutes on four CPU cores.
+It turns like a DNA model without a 3D model on the page. The helix is built with screw symmetry (identical
+rungs, a surface that repeats every rung step), so turning it by one rung step looks exactly like sliding it by
+one rung spacing. Blender renders 12 frames across that one step (`src/assets/helix/`); the page plays them in
+order, cross-fading neighbours, and shifts the picture by a rung spacing each time it wraps around. Each frame
+is one seamless turn, so it tiles as tall as the screen needs. Phones get half-size frames.
+`--preview helix-preview.png` renders a perspective close-up for look development, `--check` renders one extra
+frame a full step on to verify the symmetry, and `--look '{"absorb": 2}'` overrides the studio or glass settings
+(see `LOOK` in the script). The full set takes about 45 minutes on four CPU cores.
 
 ## What is in the box
 
@@ -109,7 +112,7 @@ A full strip render with `--dispersion` takes about ten minutes on four CPU core
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Glass DNA helix and light studio (Home): Blender render, scroll-to-spin, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py` |
+| Glass DNA helix and light studio (Home): Blender rotation frames, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |

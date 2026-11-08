@@ -36,10 +36,10 @@ export class Stage {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }));
     if (!r.capabilities.isWebGL2) throw new Error('WebGL2 is not available');
     // Resolution starts inside a pixel budget; adapt() then moves it up or down with the frame rate.
-    this.maxDpr = mobile ? 1.5 : 1.75;
+    this.maxDpr = 2;
     this.minDpr = mobile ? 0.6 : 0.75;
     const native = Math.min(window.devicePixelRatio || 1, this.maxDpr);
-    const fit = Math.sqrt((mobile ? 1.5e6 : 3.2e6) / (innerWidth * innerHeight));
+    const fit = Math.sqrt((mobile ? 1.6e6 : 5.2e6) / (innerWidth * innerHeight));
     this.dpr = Math.max(this.minDpr, Math.min(native, Math.floor(fit * 8) / 8));
     this.dprCeil = native;
     this.vsync = 1 / 60;
@@ -928,7 +928,7 @@ export class Stage {
     this.distort.uniforms.uStrength.value = this.reduced ? 0 : st.fluid;
     const fp = this.finalPass.uniforms;
     fp.uVignette.value = 0.4 - 0.27 * st.home;
-    fp.uGrain.value = 0.05 - 0.02 * st.home;
+    fp.uGrain.value = 0.05 - 0.034 * st.home; // a cleaner, sharper picture on Home
     fp.uTime.value = this.time;
     fp.uFade.value = st.fade;
 

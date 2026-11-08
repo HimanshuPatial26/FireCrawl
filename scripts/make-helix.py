@@ -1,26 +1,29 @@
-"""Model the glass DNA helix in Blender and render it for the Home hero.
+"""Model the glass DNA helix in Blender and render its rotation for the Home hero.
 
 Runs headless with Blender's Python module (the bpy wheel needs Python 3.13):
     pip install bpy==5.2.3 numpy
-    python scripts/make-helix.py --strip helix-strip.png --drop helix-drop.png --preview helix-preview.png
+    python scripts/make-helix.py --frames helix-frames --drop helix-drop.png --preview helix-preview.png
 then encode the renders for the site (needs Pillow):
-    python3 scripts/encode-helix.py helix-strip.png helix-drop.png
+    python3 scripts/encode-helix.py helix-frames helix-drop.png
 
-Why a render and not a live material: the look is clear glass refracting a studio and itself, which only a path
-tracer gets right. The page still spins it: a helix turning about its axis looks exactly like a helix sliding
-along that axis, so the site scrolls one seamless render (the "strip") to spin the helix.
+Why renders and not a live material: the look is clear glass refracting a studio and itself, which only a path
+tracer gets right.
 
-That needs a seamless strip, so everything here is periodic along the axis with a period of TILE turns:
-  - the geometry (strands, rungs and every random variation) repeats every TILE turns, and is built one turn
-    longer at each end so the rendered middle never sees an end;
-  - the voxel size divides the period, so the remesh grid lines up the same way at both ends of the tile;
-  - the surface ripples are noise sampled through cos/sin of the height, so they repeat too;
+How a handful of frames make an endless rotation: the helix is built with screw symmetry. Every rung is the same,
+and the liquid surface repeats once per rung step, so turning it by one rung step (360 / rungs-per-turn degrees)
+gives exactly the same shape as sliding it up by one rung spacing. The script renders N frames across that one
+step; the page plays them in order and, each time it wraps around, shifts the picture by one rung spacing. Rungs
+stay at their height and swing round, like a turning DNA model.
+
+Each frame shows exactly one turn and is seamless top to bottom, so the page can tile it as tall as it needs:
+  - the geometry is built a turn longer at each end, so the rendered turn never sees an end;
+  - the voxel size divides the pitch, so the remesh grid lines up the same way a turn apart;
+  - the surface noise is sampled in helical coordinates, so it has the same symmetry as the shape;
   - the light is a direction-only studio environment and the camera is orthographic, so shading does not
     change with height.
-The strip is the middle TILE turns, rendered on a transparent background.
 
 Pipeline: two rounded strands swept along a double helix + rounded rungs that swell into the strands
--> voxel remesh (one liquid body) -> smoothing -> gentle periodic swell and ripples -> smoothing -> Cycles glass.
+-> voxel remesh (one liquid body) -> smoothing -> gentle swell and ripples -> smoothing -> Cycles glass.
 """
 import argparse
 import json
@@ -34,36 +37,39 @@ from mathutils import Vector, noise
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--seed", type=int, default=7)
-ap.add_argument("--tile-turns", type=int, default=2, help="period of the strip, in turns")
 ap.add_argument("--pitch", type=float, default=5.8)
 ap.add_argument("--radius", type=float, default=1.0)
 ap.add_argument("--rungs-per-turn", type=int, default=18)
-ap.add_argument("--voxel", type=float, default=0.02, help="must divide pitch * tile-turns")
-ap.add_argument("--strip", help="render the seamless strip (PNG, RGBA)")
-ap.add_argument("--strip-width", type=int, default=860)
+ap.add_argument("--voxel", type=float, default=0.0145, help="must divide the pitch")
+ap.add_argument("--frames", help="directory for the rotation frames (frame-00.png ...)")
+ap.add_argument("--count", type=int, default=12, help="frames across one rung step")
+ap.add_argument("--check", action="store_true", help="also render the frame one full step on, to verify symmetry")
+ap.add_argument("--width", type=int, default=1280, help="frame width in pixels")
 ap.add_argument("--drop", help="render a glass droplet sprite (PNG, RGBA)")
 ap.add_argument("--preview", help="perspective close-up for comparing against a reference (PNG)")
-ap.add_argument("--samples", type=int, default=160)
-ap.add_argument("--dispersion", action="store_true", help="render R, G and B with slightly different IOR")
-ap.add_argument("--meta", default=str(Path(__file__).resolve().parent.parent / "src" / "assets" / "helix-meta.json"))
+ap.add_argument("--samples", type=int, default=128)
+ap.add_argument("--dispersion", action="store_true", help="droplet: render R, G and B with slightly different IOR")
 ap.add_argument("--look", default="{}", help="JSON overrides for the studio and material (look development)")
 args = ap.parse_args()
 
-R, P, TILE = args.radius, args.pitch, args.tile_turns
-L = P * TILE  # length of one period along the axis
-assert abs(L / args.voxel - round(L / args.voxel)) < 1e-6, "voxel size must divide the period"
+R, P, N_RUNGS = args.radius, args.pitch, args.rungs_per_turn
+STEP = 2 * math.pi / N_RUNGS  # the screw symmetry: turn by STEP, slide by P / N_RUNGS
+assert abs(P / args.voxel - round(P / args.voxel)) < 1e-6, "voxel size must divide the pitch"
+BG = 0.94  # sRGB of the flat backdrop behind the frames; the page keys it out (see src/gl/helix.js)
 LOOK = {
-    # studio (direction -> radiance): a dark room, an overhead softbox, a soft fill behind the camera and a black
-    # floor. Dark surroundings are what draw the dark lines inside clear glass. The optional tall strips add
-    # sparkle but break up into dashed marks through the rungs, so they are off.
-    "room": 0.01, "walls": 0.02, "cyc": 0.0, "top": 7.0, "front": 0.35, "strips": 0.0, "floor": 0.02,
+    # studio (direction -> radiance): a dim room, an overhead softbox, a soft fill behind the camera, a big soft
+    # window up and to the left of the camera, and a dark floor. The dark surroundings draw the dark lines inside
+    # clear glass; the window gives broad, realistic highlights. The optional tall strips add sparkle but break up
+    # into dashed marks through the rungs, so they are off.
+    "room": 0.025, "walls": 0.02, "cyc": 0.2, "top": 7.0, "front": 0.6, "strips": 0.0, "floor": 0.02,
+    "softbox": 2.5,
     "tint": [0.98, 0.99, 1.0],
     # glass
     "ior": 1.5, "color": [0.95, 0.97, 1.0], "rough": 0.0,
     # light smoky absorption inside the glass: thick parts read darker than thin edges
-    "absorb": 2.4, "absorb_color": [0.85, 0.865, 0.89],
+    "absorb": 1.6, "absorb_color": [0.85, 0.865, 0.89],
     # the droplets sit in a bright studio of their own, so they read clear and light like the reference
-    "drop": {"room": 0.75, "walls": 0.55, "cyc": 1.0, "top": 4.0, "front": 1.1, "strips": 4.0, "floor": 0.04},
+    "drop": {"room": 0.75, "walls": 0.55, "cyc": 1.0, "top": 4.0, "front": 1.1, "strips": 4.0, "floor": 0.04, "softbox": 0.0},
 }
 LOOK.update(json.loads(args.look))
 
@@ -76,15 +82,15 @@ def ss(a, b, x):
     return t * t * (3 - 2 * t)
 
 
-def pnoise(th, rad, seed):
-    """noise that repeats every TILE turns of theta"""
-    a = th / TILE
+def step_noise(th, rad, seed):
+    """noise along the strands that repeats every rung step, keeping the screw symmetry"""
+    a = th * N_RUNGS
     return noise.noise(Vector((math.cos(a) * rad, math.sin(a) * rad, seed)))
 
 
 def helix(th, phase):
     a = th + phase
-    return Vector((R * math.cos(a), R * math.sin(a), P * th / (2 * math.pi) - L / 2))
+    return Vector((R * math.cos(a), R * math.sin(a), P * th / (2 * math.pi) - P / 2))
 
 
 def frame(th, phase):
@@ -122,22 +128,21 @@ def add_tube(rings):
             faces.append(f if idx else f[::-1])
 
 
-TH0, TH1 = -2 * math.pi, 2 * math.pi * (TILE + 1)  # one extra turn beyond each end of the tile
+TH0, TH1 = -2 * math.pi, 4 * math.pi  # the rendered turn is theta 0..2pi, with a turn of geometry each side
 
-# ---------------------------------------------------------------- strands: rounded, gently swelling tubes
+# ---------------------------------------------------------------- strands: rounded tubes, beading gently per rung
 K = 32
 STRAND_W, STRAND_T = 0.46, 0.38
-for phase, seed in ((0.0, 1.7), (math.pi, 9.3)):
+for phase, seed in ((0.0, 1.7), (math.pi, 1.7)):  # same seed: the two strands are copies, as in the molecule
     rings = []
-    samples = int((TH1 - TH0) / (2 * math.pi) * 160)
+    samples = int((TH1 - TH0) / (2 * math.pi) * 216)
     for i in range(samples + 1):
         th = TH0 + (TH1 - TH0) * i / samples
         c = helix(th, phase)
         _, n, b = frame(th, phase)
-        swell = 1 + 0.09 * pnoise(th, 2.2, seed) + 0.04 * pnoise(th, 5.0, seed + 2)
-        w = STRAND_W * swell
-        h = STRAND_T * (1 + 0.08 * pnoise(th, 3.0, seed + 4))
-        c = c + n * 0.03 * pnoise(th, 2.6, seed + 6)
+        w = STRAND_W * (1 + 0.05 * step_noise(th, 0.9, seed))
+        h = STRAND_T * (1 + 0.04 * step_noise(th, 0.9, seed + 4))
+        c = c + n * 0.015 * step_noise(th, 0.9, seed + 6)
         ring = []
         for j in range(K):
             x, y = superellipse(2 * math.pi * j / K, 2.2)
@@ -145,19 +150,12 @@ for phase, seed in ((0.0, 1.7), (math.pi, 9.3)):
         rings.append(ring)
     add_tube(rings)
 
-# ---------------------------------------------------------------- rungs: rounded bars that swell into the strands
-per_tile = args.rungs_per_turn * TILE
-params = [
-    dict(rh=rng.uniform(0.17, 0.19), rd=rng.uniform(0.3, 0.34), sag=rng.uniform(0.0, 0.03), ph=rng.uniform(0, 6.28))
-    for _ in range(per_tile)
-]
-first = math.floor(TH0 / (2 * math.pi) * args.rungs_per_turn)
-last = math.ceil(TH1 / (2 * math.pi) * args.rungs_per_turn)
-for r in range(first, last):
-    th = (r + 0.5) * 2 * math.pi / args.rungs_per_turn
+# ---------------------------------------------------------------- rungs: identical rounded bars that swell into the strands
+RUNG = dict(rh=0.18, rd=0.32, sag=0.015, ph=rng.uniform(0, 6.28))
+for r in range(math.floor(TH0 / STEP), math.ceil(TH1 / STEP)):
+    th = (r + 0.5) * STEP
     if th < TH0 + 0.3 or th > TH1 - 0.3:
         continue
-    pr = params[r % per_tile]
     a, b = helix(th, 0.0), helix(th, math.pi)
     d = b - a
     length = d.length
@@ -165,15 +163,15 @@ for r in range(first, last):
     up = Vector((0, 0, 1))
     side = d.cross(up).normalized()
     rings = []
-    steps = 56
+    steps = 64
     for i in range(steps + 1):
         u = i / steps
         c = a + d * (u * length)
-        c.z -= pr["sag"] * math.sin(math.pi * u)
-        c += side * 0.02 * math.sin(2 * math.pi * u * 1.5 + pr["ph"])
+        c.z -= RUNG["sag"] * math.sin(math.pi * u)
+        c += side * 0.02 * math.sin(2 * math.pi * u * 1.5 + RUNG["ph"])
         flare = 1 + 0.7 * (1 - ss(0.05, 0.22, min(u, 1 - u)))  # swells into the strands
-        wob = 1 + 0.12 * math.sin(2 * math.pi * u * 2 + pr["ph"] * 1.7) + 0.06 * math.sin(2 * math.pi * u * 5 + pr["ph"])
-        hh, dd = pr["rh"] * flare * wob, pr["rd"] * flare
+        wob = 1 + 0.12 * math.sin(2 * math.pi * u * 2 + RUNG["ph"] * 1.7) + 0.06 * math.sin(2 * math.pi * u * 5 + RUNG["ph"])
+        hh, dd = RUNG["rh"] * flare * wob, RUNG["rd"] * flare
         ring = []
         for j in range(24):
             x, y = superellipse(2 * math.pi * j / 24, 2.2)
@@ -209,9 +207,11 @@ m.mode = "VOXEL"
 m.voxel_size = args.voxel
 m.adaptivity = 0.0
 bake_modifiers(obj)
-smooth(obj, 1.0, 12)
+smooth(obj, 1.0, 26)  # a fine voxel grid needs more passes to smooth the same distance
 
-# periodic liquid swell and ripples along the normals (height enters only through cos/sin, so it repeats)
+# liquid swell and ripples along the normals, in helical coordinates so they share the screw symmetry:
+# u = angle around the axis minus the helix phase at that height (unchanged by any screw motion),
+# s = height in rung steps (shifts by exactly 1 per rung step)
 me = obj.data
 co = np.empty(len(me.vertices) * 3)
 me.vertices.foreach_get("co", co)
@@ -221,15 +221,17 @@ me.vertices.foreach_get("normal", nr)
 nr = nr.reshape(-1, 3)
 disp = np.empty(len(co))
 for i, (x, y, z) in enumerate(co):
-    a = 2 * math.pi * z / L
-    ca, sa = math.cos(a), math.sin(a)
-    swell = noise.noise(Vector((x * 0.9 + ca * 1.6, y * 0.9 + sa * 1.6, 3.1)))
-    ripple = noise.noise(Vector((x * 2.4 + ca * 5.0, y * 2.4 + sa * 5.0, 8.7)))
-    disp[i] = 0.03 * swell + 0.008 * ripple
+    rr = math.hypot(x, y)
+    u = math.atan2(y, x) - 2 * math.pi * z / P
+    s = 2 * math.pi * z * N_RUNGS / P
+    cu, su, cs, sn = math.cos(u), math.sin(u), math.cos(s), math.sin(s)
+    swell = noise.noise(Vector((rr * 0.8 + cu * 0.8, su * 0.8 + cs * 0.3, sn * 0.3 + 3.1)))
+    ripple = noise.noise(Vector((rr * 1.8 + cu * 1.9, su * 1.9 + cs * 0.6, sn * 0.6 + 8.7)))
+    disp[i] = 0.016 * swell + 0.0035 * ripple
 co += nr * disp[:, None]
 me.vertices.foreach_set("co", co.ravel())
 me.update()
-smooth(obj, 0.6, 4)
+smooth(obj, 0.6, 6)
 for p in obj.data.polygons:
     p.use_smooth = True
 print(f"helix: {len(obj.data.polygons)} faces")
@@ -254,6 +256,7 @@ def studio_image(o, W=2048, H=1024):
     # soft edges everywhere: a hard edge in the studio shows up as dashed marks through layers of glass
     band = S(-0.25, -0.45, dy) * S(0.75, 0.55, np.abs(dz))
     c = c + o["strips"] * (S(0.1, 0.05, np.abs(dx - 0.36)) + 0.7 * S(0.06, 0.025, np.abs(dx + 0.46))) * band
+    c = c + o["softbox"] * S(0.32, 0.16, np.abs(dx + 0.42)) * S(0.42, 0.22, np.abs(dz - 0.18)) * S(-0.3, -0.6, dy)
     c = c + (o["floor"] - c) * S(-0.06, -0.32, dz)
     t = LOOK["tint"]
     img = np.stack([c * t[0], c * t[1], c * t[2], np.ones_like(c)], -1).astype(np.float32)
@@ -262,6 +265,7 @@ def studio_image(o, W=2048, H=1024):
     return im
 
 
+bg_lin = ((BG + 0.055) / 1.055) ** 2.4
 world = bpy.data.worlds.new("studio")
 world.use_nodes = True
 nt = world.node_tree
@@ -269,7 +273,7 @@ env = nt.nodes.new("ShaderNodeTexEnvironment")
 env.image = studio_image(LOOK)
 lp = nt.nodes.new("ShaderNodeLightPath")
 mix = nt.nodes.new("ShaderNodeMixRGB")
-mix.inputs["Color2"].default_value = (0.82, 0.83, 0.85, 1)  # what the camera sees behind (preview only)
+mix.inputs["Color2"].default_value = (bg_lin, bg_lin, bg_lin, 1)  # what the camera sees directly: a flat backdrop
 nt.links.new(lp.outputs["Is Camera Ray"], mix.inputs["Fac"])
 nt.links.new(env.outputs["Color"], mix.inputs["Color1"])
 nt.links.new(mix.outputs["Color"], nt.nodes["Background"].inputs["Color"])
@@ -301,6 +305,7 @@ scene.cycles.glossy_bounces = 8
 scene.cycles.transparent_max_bounces = 8
 scene.cycles.caustics_reflective = False
 scene.cycles.caustics_refractive = False
+scene.cycles.seed = 3  # same noise pattern in every frame, so the denoised frames do not shimmer
 scene.view_settings.view_transform = "Standard"
 scene.view_settings.look = "None"
 
@@ -309,11 +314,11 @@ scene.collection.objects.link(cam)
 scene.camera = cam
 
 
-def render(path, transparent):
+def render(path, transparent, dispersion=False):
     scene.render.film_transparent = transparent
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA" if transparent else "RGB"
-    if not args.dispersion:
+    if not dispersion:
         scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
         return
@@ -324,8 +329,7 @@ def render(path, transparent):
         scene.render.filepath = f"{path}.c{k}.png"
         bpy.ops.render.render(write_still=True)
         im = bpy.data.images.load(scene.render.filepath)
-        px = np.array(im.pixels[:], np.float32).reshape(im.size[1], im.size[0], 4)
-        chans.append(px)
+        chans.append(np.array(im.pixels[:], np.float32).reshape(im.size[1], im.size[0], 4))
         bpy.data.images.remove(im)
         Path(scene.render.filepath).unlink()
     bsdf.inputs["IOR"].default_value = LOOK["ior"]
@@ -347,32 +351,39 @@ if args.preview:
     cam.data.sensor_fit = "VERTICAL"
     cam.location = (0, -7.6, 0.4)
     cam.rotation_euler = (math.radians(88), 0, 0)
+    obj.rotation_euler = (0, 0, 0.6)
     scene.render.resolution_x, scene.render.resolution_y = 640, 800
     render(args.preview, transparent=False)
+    obj.rotation_euler = (0, 0, 0)
     print("rendered", args.preview)
 
-if args.strip:
+if args.frames:
+    out = Path(args.frames)
+    out.mkdir(parents=True, exist_ok=True)
     width_units = OUTER * 1.18  # a little air on both sides
     cam.data.type = "ORTHO"
     cam.data.sensor_fit = "VERTICAL"
-    cam.data.ortho_scale = L
+    cam.data.ortho_scale = P  # exactly one turn, top to bottom
     cam.location = (0, -12.0, 0)
     cam.rotation_euler = (math.radians(90), 0, 0)
-    scene.render.resolution_x = args.strip_width
-    scene.render.resolution_y = round(args.strip_width * L / width_units)
-    scene.render.pixel_aspect_x = scene.render.pixel_aspect_y = 1
-    # ortho_scale applies to the vertical extent with a vertical sensor fit, so the width follows the aspect
-    render(args.strip, transparent=True)
+    scene.render.resolution_x = args.width
+    scene.render.resolution_y = round(args.width * P / width_units)
+    width_units = P * args.width / scene.render.resolution_y  # exact, after rounding the height
+    for i in range(args.count + (1 if args.check else 0)):
+        obj.rotation_euler = (0, 0, STEP * i / args.count)
+        render(str(out / f"frame-{i:02d}.png"), transparent=False)
+        print("rendered", out / f"frame-{i:02d}.png", flush=True)
     meta = {
-        "tile": [round(L * args.strip_width / scene.render.resolution_y, 5), L],
-        "outer": round(OUTER, 5),
-        "pitch": P,
-        "turns": TILE,
+        "frames": args.count,
+        "stepDegrees": round(math.degrees(STEP), 6),
+        "rungsPerTurn": N_RUNGS,
+        "tile": [round(width_units, 6), P],
+        "outer": round(OUTER, 6),
         "pixels": [scene.render.resolution_x, scene.render.resolution_y],
+        "background": BG,
     }
-    Path(args.meta).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.meta).write_text(json.dumps(meta, indent=2) + "\n")
-    print("rendered", args.strip, meta)
+    (out / "helix-meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    print("meta", meta)
 
 if args.drop:
     # a clear glass droplet on its own, reused as a sprite around the helix
@@ -386,6 +397,6 @@ if args.drop:
     cam.data.ortho_scale = 2.08
     cam.location = (0, -12.0, 0)
     cam.rotation_euler = (math.radians(90), 0, 0)
-    scene.render.resolution_x = scene.render.resolution_y = 320
-    render(args.drop, transparent=True)
+    scene.render.resolution_x = scene.render.resolution_y = 384
+    render(args.drop, transparent=True, dispersion=args.dispersion)
     print("rendered", args.drop)
