@@ -1,0 +1,767 @@
+import * as THREE from 'three';
+import gsap from 'gsap';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
+import { Fluid } from './fluid.js';
+import * as S from './shaders.js';
+
+// Louver wall size in world units (16:9)
+const W = 9.6;
+const H = 5.4;
+const DEPTH = 0.08;
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+// Scene states. Every value is tweened, so any state can blend into any other.
+const MODES = {
+  work: { hero: 0, about: 0, dim: 0, open: 1, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0 },
+  project: { hero: 1, about: 0, dim: 0.78, open: 1, arc: 0, gap: 0.035, mouseAmt: 0, glow: 0.5, orb: 0 },
+  about: { hero: 0, about: 1, dim: 0.45, open: 0, arc: 0.55, gap: 0.3, mouseAmt: 0, glow: 0.45, orb: 1 },
+  lost: { hero: 0, about: 1, dim: 0.58, open: 0, arc: 0.3, gap: 0.4, mouseAmt: 0, glow: 0.35, orb: 0 },
+};
+
+export class Stage {
+  constructor(canvas, projects, { reduced = false, mobile = false } = {}) {
+    this.projects = projects;
+    this.reduced = reduced;
+    this.mobile = mobile;
+
+    const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }));
+    if (!r.capabilities.isWebGL2) throw new Error('WebGL2 is not available');
+    this.maxDpr = mobile ? 1.5 : 1.75;
+    this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
+    r.setPixelRatio(this.dpr);
+    r.setSize(innerWidth, innerHeight, false);
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.0;
+    r.info.autoReset = false;
+
+    this.camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 120);
+    this.camera.position.set(0, 0, 16);
+    this.scene = new THREE.Scene();
+    this.overlay = new THREE.Scene();
+    this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
+
+    this.colors = { bg: new THREE.Color(), a: new THREE.Color(), b: new THREE.Color() };
+    this.state = { hero: 0, about: 0, dim: 0, fade: 1, open: 0, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0, fluid: reduced ? 0 : 1, camZ: 16 };
+    this.trans = { flip: 0, cross: 0, dir: 1, active: false, target: -1 };
+    this.pointer = { x: 0, y: 0, sx: 0, sy: 0, px: 0, py: 0, has: false };
+    this.N = mobile ? 28 : 46;
+    this.time = 0;
+    this.level = 0;
+    this.scrollVel = 0;
+    this.heroEl = null;
+    this.heroRect = null;
+    this.media = [];
+    this.frameTimes = [];
+    this.adaptive = false;
+    this.texCache = new Map();
+
+    this.current = 0;
+    this.slotA = this.makeSlot(0);
+    this.slotB = this.makeSlot(Math.min(1, projects.length - 1));
+
+    this.initArt();
+    this.initSlats();
+    this.initSky();
+    this.initFloor();
+    this.initDust();
+    this.initOrb();
+    this.initPost();
+    this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
+
+    this.setColorsFrom(this.slotA);
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Project artwork                                                   */
+  /* ---------------------------------------------------------------- */
+  makeSlot(i, variant = 0, media = null) {
+    const p = this.projects[i];
+    return {
+      index: i,
+      style: p.style,
+      seed: p.seed + variant * 0.237,
+      zoom: 1 + variant * 0.22,
+      bg: new THREE.Color(p.colors.bg),
+      a: new THREE.Color(p.colors.a),
+      b: new THREE.Color(p.colors.b),
+      tex: this.mediaTexture(media || p.cover),
+    };
+  }
+
+  mediaTexture(m) {
+    if (!m || !m.src) return null;
+    if (this.texCache.has(m.src)) return this.texCache.get(m.src);
+    const entry = { texture: null, aspect: m.aspect || 1.6, ready: false };
+    if (m.type === 'video') {
+      const v = document.createElement('video');
+      Object.assign(v, { src: m.src, muted: true, loop: true, playsInline: true, autoplay: true, crossOrigin: 'anonymous' });
+      v.addEventListener('loadeddata', () => {
+        entry.aspect = v.videoWidth / v.videoHeight || entry.aspect;
+        entry.ready = true;
+      });
+      v.play().catch(() => {});
+      entry.texture = new THREE.VideoTexture(v);
+    } else {
+      entry.texture = new THREE.TextureLoader().load(m.src, (t) => {
+        entry.aspect = t.image.width / t.image.height || entry.aspect;
+        entry.ready = true;
+      });
+    }
+    entry.texture.colorSpace = THREE.SRGBColorSpace;
+    this.texCache.set(m.src, entry);
+    return entry;
+  }
+
+  makeRT(w, h) {
+    return new THREE.WebGLRenderTarget(w, h, {
+      type: THREE.HalfFloatType,
+      depthBuffer: false,
+      stencilBuffer: false,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      generateMipmaps: false,
+    });
+  }
+
+  initArt() {
+    const [w, h] = this.mobile ? [960, 540] : [1440, 810];
+    this.rtA = this.makeRT(w, h);
+    this.rtB = this.makeRT(w, h);
+    this.artMat = new THREE.ShaderMaterial({
+      vertexShader: S.QUAD_VERT,
+      fragmentShader: S.ART_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        uTime: { value: 0 },
+        uStyle: { value: 0 },
+        uSeed: { value: 0 },
+        uAspect: { value: 16 / 9 },
+        uZoom: { value: 1 },
+        uOffset: { value: new THREE.Vector2() },
+        uBg: { value: new THREE.Color() },
+        uA: { value: new THREE.Color() },
+        uB: { value: new THREE.Color() },
+        uTex: { value: null },
+        uUseTex: { value: 0 },
+        uTexAspect: { value: 1 },
+      },
+    });
+    this.artScene = new THREE.Scene();
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.artMat);
+    q.frustumCulled = false;
+    this.artScene.add(q);
+    this.artCam = new THREE.Camera();
+  }
+
+  renderArt(slot, rt, aspect, offset) {
+    const u = this.artMat.uniforms;
+    u.uTime.value = this.time + slot.seed * 40;
+    u.uStyle.value = slot.style;
+    u.uSeed.value = slot.seed;
+    u.uAspect.value = aspect;
+    u.uZoom.value = slot.zoom;
+    u.uOffset.value.set(offset ? offset.x : 0, offset ? offset.y : 0);
+    u.uBg.value.copy(slot.bg);
+    u.uA.value.copy(slot.a);
+    u.uB.value.copy(slot.b);
+    const t = slot.tex;
+    u.uUseTex.value = t && t.ready ? 1 : 0;
+    u.uTex.value = t ? t.texture : null;
+    u.uTexAspect.value = t ? t.aspect : 1;
+    this.renderer.setRenderTarget(rt);
+    this.renderer.render(this.artScene, this.artCam);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Scene objects                                                     */
+  /* ---------------------------------------------------------------- */
+  initSlats() {
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const idx = new Float32Array(this.N);
+    for (let i = 0; i < this.N; i++) idx[i] = i;
+    geo.setAttribute('aIndex', new THREE.InstancedBufferAttribute(idx, 1));
+    this.slatMat = new THREE.ShaderMaterial({
+      vertexShader: S.SLAT_VERT,
+      fragmentShader: S.SLAT_FRAG,
+      uniforms: {
+        uTexA: { value: this.rtA.texture },
+        uTexB: { value: this.rtB.texture },
+        uCount: { value: this.N },
+        uWidth: { value: W },
+        uHeight: { value: H },
+        uDepth: { value: DEPTH },
+        uGap: { value: 0.24 },
+        uArc: { value: 1 },
+        uSpan: { value: 1.15 },
+        uFlip: { value: 0 },
+        uDir: { value: 1 },
+        uSpread: { value: 1.6 },
+        uOpen: { value: 0 },
+        uTime: { value: 0 },
+        uMouseX: { value: 0 },
+        uMouseAmt: { value: 0 },
+        uLift: { value: 0.55 },
+        uCross: { value: 0 },
+        uBg: { value: this.colors.bg },
+        uA: { value: this.colors.a },
+        uDim: { value: 0 },
+      },
+    });
+    this.slats = new THREE.InstancedMesh(geo, this.slatMat, this.N);
+    this.slats.frustumCulled = false;
+    this.group = new THREE.Group();
+    this.group.add(this.slats);
+    this.scene.add(this.group);
+  }
+
+  initSky() {
+    const m = new THREE.ShaderMaterial({
+      vertexShader: S.SKY_VERT,
+      fragmentShader: S.SKY_FRAG,
+      uniforms: {
+        uBg: { value: this.colors.bg },
+        uA: { value: this.colors.a },
+        uB: { value: this.colors.b },
+        uTime: { value: 0 },
+        uDim: { value: 0 },
+        uGlow: { value: 1 },
+        uGlowC: { value: new THREE.Vector2() },
+        uGlowR: { value: new THREE.Vector2(1, 1) },
+      },
+    });
+    this.sky = new THREE.Mesh(new THREE.PlaneGeometry(64, 36), m);
+    this.sky.position.z = -6;
+    this.scene.add(this.sky);
+  }
+
+  reflectSize() {
+    return { w: Math.max(2, Math.round(innerWidth * this.dpr * 0.5)), h: Math.max(2, Math.round(innerHeight * this.dpr * 0.5)) };
+  }
+
+  initFloor() {
+    const s = this.reflectSize();
+    // floor runs from the backdrop (z = -6) to behind the camera
+    this.floor = new Reflector(new THREE.PlaneGeometry(70, 22), {
+      textureWidth: s.w,
+      textureHeight: s.h,
+      clipBias: 0.003,
+      multisample: 0,
+      shader: S.FloorShader,
+    });
+    this.floor.rotation.x = -Math.PI / 2;
+    this.floor.position.set(0, -2.8, 5);
+    const u = this.floor.material.uniforms;
+    u.uBg.value = this.colors.bg;
+    u.uA.value = this.colors.a;
+    this.scene.add(this.floor);
+  }
+
+  initDust() {
+    const n = this.mobile ? 320 : 700;
+    const pos = new Float32Array(n * 3);
+    const rnd = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 22;
+      pos[i * 3 + 1] = (Math.random() - 0.4) * 9;
+      pos[i * 3 + 2] = -5 + Math.random() * 13;
+      rnd[i] = Math.random();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aRand', new THREE.BufferAttribute(rnd, 1));
+    this.dust = new THREE.Points(
+      g,
+      new THREE.ShaderMaterial({
+        vertexShader: S.DUST_VERT,
+        fragmentShader: S.DUST_FRAG,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uTime: { value: 0 }, uPR: { value: 1 }, uA: { value: this.colors.a }, uDim: { value: 0 } },
+      })
+    );
+    this.dust.frustumCulled = false;
+    this.scene.add(this.dust);
+  }
+
+  initOrb() {
+    const n = this.mobile ? 5000 : 11000;
+    const pos = new Float32Array(n * 3);
+    const rnd = new Float32Array(n);
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < n; i++) {
+      const y = 1 - (i / (n - 1)) * 2;
+      const rad = Math.sqrt(1 - y * y);
+      const th = golden * i;
+      const R = 1.55 + (Math.random() - 0.5) * 0.06;
+      pos[i * 3] = Math.cos(th) * rad * R;
+      pos[i * 3 + 1] = y * R;
+      pos[i * 3 + 2] = Math.sin(th) * rad * R;
+      rnd[i] = Math.random();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aRand', new THREE.BufferAttribute(rnd, 1));
+    this.orb = new THREE.Points(
+      g,
+      new THREE.ShaderMaterial({
+        vertexShader: S.ORB_VERT,
+        fragmentShader: S.ORB_FRAG,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          uTime: { value: 0 },
+          uShow: { value: 0 },
+          uLevel: { value: 0 },
+          uPR: { value: 1 },
+          uAspect: { value: 1 },
+          uMouse: { value: new THREE.Vector2(9, 9) },
+          uA: { value: this.colors.a },
+        },
+      })
+    );
+    this.orb.frustumCulled = false;
+    this.orb.visible = false;
+    this.scene.add(this.orb);
+  }
+
+  initPost() {
+    const c = (this.composer = new EffectComposer(this.renderer));
+    c.addPass(new RenderPass(this.scene, this.camera));
+    const ov = new RenderPass(this.overlay, this.ortho);
+    ov.clear = false;
+    ov.clearDepth = true;
+    c.addPass(ov);
+    this.distort = new ShaderPass(S.DistortShader);
+    c.addPass(this.distort);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), this.mobile ? 0.6 : 0.7, 0.6, 0.78);
+    c.addPass(this.bloom);
+    c.addPass(new OutputPass());
+    this.finalPass = new ShaderPass(S.FinalShader);
+    c.addPass(this.finalPass);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Transitions                                                       */
+  /* ---------------------------------------------------------------- */
+  setColorsFrom(slot) {
+    this.colors.bg.copy(slot.bg);
+    this.colors.a.copy(slot.a);
+    this.colors.b.copy(slot.b);
+  }
+
+  setMode(name, { duration = 1.8, delay = 0 } = {}) {
+    const t = MODES[name];
+    gsap.killTweensOf(this.state, Object.keys(t).join(','));
+    return new Promise((res) =>
+      gsap.to(this.state, { ...t, duration: this.reduced ? 0.01 : duration, delay, ease: 'expo.inOut', onComplete: res })
+    );
+  }
+
+  intro() {
+    this.adaptive = true;
+    gsap.to(this.state, { fade: 0, duration: this.reduced ? 0.3 : 2.2, ease: 'power2.inOut' });
+    gsap.fromTo(this.state, { camZ: 16 }, { camZ: 12, duration: this.reduced ? 0.01 : 3.4, ease: 'expo.out' });
+  }
+
+  fadeTo(v, duration = 0.4) {
+    return new Promise((res) => gsap.to(this.state, { fade: v, duration: this.reduced ? 0.01 : duration, ease: 'power2.inOut', onComplete: res }));
+  }
+
+  prepB(i) {
+    this.slotB = this.makeSlot(i);
+    this.trans.target = i;
+  }
+
+  commit() {
+    const tr = this.trans;
+    const tmp = this.rtA;
+    this.rtA = this.rtB;
+    this.rtB = tmp;
+    this.slotA = this.slotB;
+    this.current = tr.target;
+    tr.flip = 0;
+    tr.cross = 0;
+    tr.active = false;
+    const u = this.slatMat.uniforms;
+    u.uTexA.value = this.rtA.texture;
+    u.uTexB.value = this.rtB.texture;
+    this.setColorsFrom(this.slotA);
+  }
+
+  cancel() {
+    Object.assign(this.trans, { flip: 0, cross: 0, active: false });
+    this.setColorsFrom(this.slotA);
+  }
+
+  settle() {
+    const tr = this.trans;
+    if (!tr.active) return;
+    gsap.killTweensOf(tr);
+    if (tr.flip >= 0.5 || tr.cross >= 0.5) this.commit();
+    else this.cancel();
+  }
+
+  tweenTrans(vars, duration, ease = 'none') {
+    return new Promise((res) =>
+      gsap.to(this.trans, {
+        ...vars,
+        duration,
+        ease,
+        onComplete: () => {
+          this.commit();
+          res();
+        },
+      })
+    );
+  }
+
+  flipTo(i, dir = 1, { duration = 1.8 } = {}) {
+    this.settle();
+    if (i === this.current) return Promise.resolve();
+    this.prepB(i);
+    Object.assign(this.trans, { active: true, flip: 0, cross: 0, dir });
+    if (this.reduced) return this.tweenTrans({ cross: 1 }, 0.5, 'power2.inOut');
+    return this.tweenTrans({ flip: 1 }, duration, 'power1.inOut');
+  }
+
+  crossTo(i, duration = 0.9) {
+    this.settle();
+    if (i === this.current) return Promise.resolve();
+    this.prepB(i);
+    Object.assign(this.trans, { active: true, flip: 0, cross: 0, dir: 1 });
+    return this.tweenTrans({ cross: 1 }, this.reduced ? 0.01 : duration, 'power2.inOut');
+  }
+
+  setProject(i) {
+    this.settle();
+    if (i === this.current) return;
+    this.slotA = this.makeSlot(i);
+    this.current = i;
+    this.setColorsFrom(this.slotA);
+  }
+
+  scrubStart(i, dir) {
+    gsap.killTweensOf(this.trans);
+    if (this.trans.active && this.trans.target !== i) this.cancel();
+    if (i === this.current) return;
+    this.prepB(i);
+    Object.assign(this.trans, { active: true, flip: 0, cross: 0, dir });
+  }
+
+  scrubSet(p) {
+    if (!this.trans.active) return;
+    this.trans[this.reduced ? 'cross' : 'flip'] = p;
+  }
+
+  scrubEnd(commit) {
+    const tr = this.trans;
+    if (!tr.active) return Promise.resolve();
+    const key = this.reduced ? 'cross' : 'flip';
+    const to = commit ? 1 : 0;
+    const d = Math.max(0.35, Math.abs(to - tr[key]) * 1.7);
+    return new Promise((res) =>
+      gsap.to(tr, {
+        [key]: to,
+        duration: d,
+        ease: 'power2.out',
+        onComplete: () => {
+          if (commit) this.commit();
+          else this.cancel();
+          res();
+        },
+      })
+    );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* DOM-synced media planes                                           */
+  /* ---------------------------------------------------------------- */
+  setMedia(items) {
+    this.clearMedia();
+    const [w, h] = this.mobile ? [640, 400] : [1024, 640];
+    for (const it of items) {
+      const p = this.projects[it.index];
+      const slot = this.makeSlot(it.index, it.variant, p.media && p.media[it.variant]);
+      const rt = this.makeRT(w, h);
+      const mat = new THREE.ShaderMaterial({
+        vertexShader: S.MEDIA_VERT,
+        fragmentShader: S.MEDIA_FRAG,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        uniforms: {
+          uTex: { value: rt.texture },
+          uReveal: { value: this.reduced ? 1 : 0 },
+          uVel: { value: 0 },
+          uA: { value: slot.a },
+          uSeed: { value: slot.seed },
+          uHover: { value: 0 },
+        },
+      });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 24, 24), mat);
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      this.overlay.add(mesh);
+      this.media.push({ el: it.el, kind: it.kind || 'media', slot, rt, mesh, mat, revealed: this.reduced });
+    }
+  }
+
+  setMediaHover(el, on) {
+    const m = this.media.find((x) => x.el === el);
+    if (m) gsap.to(m.mat.uniforms.uHover, { value: on ? 1 : 0, duration: 0.9, ease: 'expo.out' });
+  }
+
+  setNextProgress(p) {
+    const m = this.media.find((x) => x.kind === 'next');
+    if (m) m.mat.uniforms.uReveal.value = p;
+  }
+
+  clearMedia() {
+    for (const m of this.media) {
+      this.overlay.remove(m.mesh);
+      m.mesh.geometry.dispose();
+      m.mat.dispose();
+      m.rt.dispose();
+    }
+    this.media = [];
+  }
+
+  updateMedia() {
+    const vel = Math.max(-1, Math.min(1, this.scrollVel * 0.02));
+    for (const m of this.media) {
+      if (!m.el.isConnected) {
+        m.mesh.visible = false;
+        continue;
+      }
+      const b = m.el.getBoundingClientRect();
+      const vis = b.width > 0 && b.bottom > -40 && b.top < innerHeight + 40;
+      m.mesh.visible = vis;
+      if (!vis) continue;
+      m.mesh.position.set(b.left + b.width / 2 - innerWidth / 2, -(b.top + b.height / 2 - innerHeight / 2), 0);
+      m.mesh.scale.set(b.width, b.height, 1);
+      const u = m.mat.uniforms;
+      u.uVel.value += (-vel * 0.06 - u.uVel.value) * 0.15;
+      this.renderArt(m.slot, m.rt, b.width / b.height, null);
+      if (!m.revealed && m.kind !== 'next' && b.top < innerHeight * 0.88) {
+        m.revealed = true;
+        gsap.to(u.uReveal, { value: 1, duration: 1.8, ease: 'power3.inOut' });
+      }
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Input / sizing / frame                                            */
+  /* ---------------------------------------------------------------- */
+  pointerMove(x, y) {
+    const p = this.pointer;
+    if (p.has && this.state.fluid > 0.01) {
+      const dx = (x - p.px) / innerWidth;
+      const dy = -(y - p.py) / innerHeight;
+      if (dx || dy) {
+        const f = 3800 * this.state.fluid;
+        this.fluid.splat(x / innerWidth, 1 - y / innerHeight, dx * f, dy * f);
+      }
+    }
+    p.px = x;
+    p.py = y;
+    p.x = (x / innerWidth) * 2 - 1;
+    p.y = -((y / innerHeight) * 2 - 1);
+    p.has = true;
+  }
+
+  resize() {
+    const w = innerWidth;
+    const h = innerHeight;
+    const r = this.renderer;
+    r.setPixelRatio(this.dpr);
+    r.setSize(w, h, false);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.composer.setPixelRatio(this.dpr);
+    this.composer.setSize(w, h);
+    Object.assign(this.ortho, { left: -w / 2, right: w / 2, top: h / 2, bottom: -h / 2 });
+    this.ortho.updateProjectionMatrix();
+    const rs = this.reflectSize();
+    this.floor.getRenderTarget().setSize(rs.w, rs.h);
+    this.fluid.resize(w / h);
+    this.finalPass.uniforms.uRes.value.set(w * this.dpr, h * this.dpr);
+    this.dust.material.uniforms.uPR.value = this.dpr;
+    this.orb.material.uniforms.uPR.value = this.dpr;
+    this.orb.material.uniforms.uAspect.value = w / h;
+  }
+
+  adapt(dt) {
+    if (!this.adaptive || document.hidden) return;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < 150) return;
+    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    this.frameTimes.length = 0;
+    if (avg > 1 / 42 && this.dpr > 0.75) {
+      this.dpr = Math.max(0.75, this.dpr - 0.25);
+      this.resize();
+    }
+  }
+
+  // Compile every program during the preloader so no page pays a first-use shader stall.
+  prepare() {
+    this.update(1 / 60);
+    const warm = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.ShaderMaterial({
+        vertexShader: S.MEDIA_VERT,
+        fragmentShader: S.MEDIA_FRAG,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        uniforms: {
+          uTex: { value: this.rtA.texture },
+          uReveal: { value: 1 },
+          uVel: { value: 0 },
+          uA: { value: this.colors.a },
+          uSeed: { value: 0 },
+          uHover: { value: 0 },
+        },
+      })
+    );
+    this.overlay.add(warm);
+    this.orb.visible = true;
+    const r = this.renderer;
+    const compile = (scene, cam) => (r.compileAsync ? r.compileAsync(scene, cam) : Promise.resolve(r.compile(scene, cam)));
+    return Promise.all([compile(this.scene, this.camera), compile(this.overlay, this.ortho)])
+      .catch(() => {})
+      .then(() => {
+        this.state.orb = 0.0011; // render the orb and media program once while the screen is still black
+        this.update(1 / 60);
+        this.state.orb = 0;
+        this.overlay.remove(warm);
+        warm.geometry.dispose();
+        warm.material.dispose();
+        return new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      });
+  }
+
+  update(dt) {
+    const st = this.state;
+    const tr = this.trans;
+    const r = this.renderer;
+    r.info.reset();
+    this.time += dt;
+    this.adapt(dt);
+
+    const p = this.pointer;
+    const k = 1 - Math.exp(-dt * 5);
+    p.sx += (p.x - p.sx) * k;
+    p.sy += (p.y - p.sy) * k;
+
+    if (tr.active) {
+      const t = Math.max(easeIO(Math.min(1, tr.flip)), tr.cross);
+      this.colors.bg.lerpColors(this.slotA.bg, this.slotB.bg, t);
+      this.colors.a.lerpColors(this.slotA.a, this.slotB.a, t);
+      this.colors.b.lerpColors(this.slotA.b, this.slotB.b, t);
+    }
+
+    // layout: blend between work / hero / about placements
+    const cam = this.camera;
+    const visH = 2 * st.camZ * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+    const visW = visH * cam.aspect;
+    const upp = visH / innerHeight;
+    const ws = Math.min((visH * 0.6) / H, (visW * (this.mobile ? 0.94 : 0.72)) / W);
+    const work = { x: 0, y: visH * (this.mobile ? 0.1 : 0.07), z: 0, sx: ws, sy: ws };
+    if (this.heroEl && this.heroEl.isConnected) {
+      const b = this.heroEl.getBoundingClientRect();
+      this.heroRect = { l: b.left, t: b.top, w: b.width, h: b.height };
+    }
+    let hero = work;
+    if (this.heroRect) {
+      const b = this.heroRect;
+      hero = {
+        x: (b.l + b.w / 2 - innerWidth / 2) * upp,
+        y: -(b.t + b.h / 2 - innerHeight / 2) * upp,
+        z: 0,
+        sx: (b.w * upp) / W,
+        sy: (b.h * upp) / H,
+      };
+    }
+    const about = this.mobile
+      ? { x: 0, y: visH * 0.18, z: -4, sx: ws * 1.1, sy: ws * 1.1 }
+      : { x: -visW * 0.08, y: visH * 0.05, z: -4.5, sx: ws * 1.25, sy: ws * 1.25 };
+    const blend = (key) => lerp(lerp(work[key], hero[key], st.hero), about[key], st.about);
+    const g = this.group;
+    g.position.set(blend('x'), blend('y'), blend('z'));
+    g.scale.set(blend('sx'), blend('sy'), 1);
+    const artAspect = (W * g.scale.x) / (H * g.scale.y);
+
+    const par = (1 - st.hero) * (this.reduced ? 0 : 1);
+    cam.position.set(p.sx * 0.5 * par, p.sy * 0.28 * par, st.camZ);
+    cam.lookAt(0, 0, 0);
+
+    this.floor.position.y = work.y - (H * ws) / 2 - 0.25;
+
+    const u = this.slatMat.uniforms;
+    u.uTime.value = this.time;
+    u.uFlip.value = tr.flip;
+    u.uDir.value = tr.dir;
+    u.uCross.value = tr.cross;
+    u.uOpen.value = st.open;
+    u.uArc.value = st.arc;
+    u.uGap.value = st.gap;
+    u.uDim.value = st.dim * (1 - st.hero);
+    u.uMouseX.value = ((p.sx * visW) / 2 - g.position.x) / g.scale.x;
+    u.uMouseAmt.value = st.mouseAmt * (p.has ? 1 : 0) * (this.reduced ? 0 : 1);
+
+    const depth = st.camZ - g.position.z;
+    const skyDist = st.camZ + 6;
+    const su = this.sky.material.uniforms;
+    su.uTime.value = this.time;
+    su.uDim.value = st.dim;
+    su.uGlow.value = st.glow;
+    const proj = skyDist / depth;
+    su.uGlowC.value.set(g.position.x * proj, g.position.y * proj);
+    su.uGlowR.value.set(Math.max(0.5, W * g.scale.x * 0.5 * proj), Math.max(0.5, H * g.scale.y * 0.5 * proj));
+
+    const fu = this.floor.material.uniforms;
+    fu.uTime.value = this.time;
+    fu.uDim.value = Math.max(st.dim, st.hero * 0.92);
+    this.dust.material.uniforms.uTime.value = this.time;
+    this.dust.material.uniforms.uDim.value = st.dim;
+
+    const ou = this.orb.material.uniforms;
+    this.orb.visible = st.orb > 0.001;
+    ou.uTime.value = this.time;
+    ou.uShow.value = st.orb;
+    ou.uLevel.value += (this.level - ou.uLevel.value) * 0.2;
+    ou.uMouse.value.set(p.has ? p.sx : 9, p.has ? p.sy : 9);
+    this.orb.scale.setScalar(this.mobile ? 0.62 : 1);
+    if (this.mobile) this.orb.position.set(0, visH * 0.22, 0);
+    else this.orb.position.set(visW * 0.24, 0.1, 0);
+    this.orb.rotation.y = this.time * 0.05;
+
+    if (st.fluid > 0.01 && !this.reduced) this.fluid.update(Math.min(dt, 1 / 30));
+    this.distort.uniforms.tFluid.value = this.fluid.texture;
+    this.distort.uniforms.uStrength.value = this.reduced ? 0 : st.fluid;
+    const fp = this.finalPass.uniforms;
+    fp.uTime.value = this.time;
+    fp.uFade.value = st.fade;
+
+    const off = { x: -p.sx * 0.012 * (1 - st.hero), y: -p.sy * 0.01 * (1 - st.hero) };
+    this.renderArt(this.slotA, this.rtA, artAspect, off);
+    if (tr.active) this.renderArt(this.slotB, this.rtB, artAspect, off);
+    this.updateMedia();
+
+    r.setRenderTarget(null);
+    this.composer.render(dt);
+  }
+}

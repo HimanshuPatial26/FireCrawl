@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Louver Portfolio</title>
+    <meta name="claude:viewport-fit-sides" content="cover" />
+    <meta name="description" content="Portfolio of a creative developer: WebGL, motion and sound for the web." />
+    <meta name="theme-color" content="#06070a" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;700;800&family=Hanken+Grotesk:wght@400;500&family=Martian+Mono:wght@400&display=swap"
+    />
+  </head>
+  <body>
+    <canvas id="gl" aria-hidden="true"></canvas>
+    <header class="hud" id="hud"></header>
+    <main id="view" tabindex="-1"></main>
+    <div class="cursor" aria-hidden="true">
+      <span class="cursor-ring"></span><span class="cursor-dot"></span><span class="cursor-label"></span>
+    </div>
+    <p class="sr-only" id="live" aria-live="polite"></p>
+    <div class="pre" id="pre"></div>
+    <noscript><p class="noscript">This portfolio needs JavaScript and WebGL to run.</p></noscript>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
