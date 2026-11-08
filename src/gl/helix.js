@@ -1,156 +1,101 @@
 import * as THREE from 'three';
-import { HELIX } from './helix-data.js';
+import stripUrl from '../assets/helix-strip.webp';
+import dropUrl from '../assets/helix-drop.webp';
+import META from '../assets/helix-meta.json';
 
-// Liquid chrome DNA helix for the Home hero, with clear glass droplets around it.
-// Geometry is modelled in Blender (scripts/make-helix.py) and shipped as a quantised mesh.
-// Look: polished chrome in a procedural high-key studio (PMREM, see STUDIO_FRAG), on a light backdrop.
-// The surface flows slowly and ripples around the cursor in the vertex shader; normals follow, so the
-// reflections move with it.
+// Glass DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded live:
+// clear smoky glass refracting a studio and itself only looks right path traced.
+//
+// It still spins. A helix turning about its axis looks exactly like a helix sliding along that axis, and the
+// render is one seamless period of it (META.turns turns, transparent background), so the strip just scrolls:
+// turning by an angle a moves it by pitch * a / 2pi along the axis. Drag, idle spin and the cursor ripple
+// work on that scroll. The glass droplets are a second Blender render, used as sprites.
+//
+// The renders are display-ready sRGB. The site tone maps the whole scene in its final pass (ACES + sRGB),
+// so the shader undoes that curve first: what leaves the final pass is the Blender render, pixel for pixel.
 
-const NOISE = /* glsl */ `
-vec3 lvMod289(vec3 x){ return x - floor(x * (1.0 / 289.0)) * 289.0; }
-vec4 lvMod289(vec4 x){ return x - floor(x * (1.0 / 289.0)) * 289.0; }
-vec4 lvPermute(vec4 x){ return lvMod289(((x * 34.0) + 10.0) * x); }
-vec4 lvTaylor(vec4 r){ return 1.79284291400159 - 0.85373472095314 * r; }
-// 3D simplex noise (Ashima Arts / Stefan Gustavson, MIT)
-float lvNoise(vec3 v){
-  const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
-  const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
-  vec3 i = floor(v + dot(v, C.yyy));
-  vec3 x0 = v - i + dot(i, C.xxx);
-  vec3 g = step(x0.yzx, x0.xyz);
-  vec3 l = 1.0 - g;
-  vec3 i1 = min(g.xyz, l.zxy);
-  vec3 i2 = max(g.xyz, l.zxy);
-  vec3 x1 = x0 - i1 + C.xxx;
-  vec3 x2 = x0 - i2 + C.yyy;
-  vec3 x3 = x0 - D.yyy;
-  i = lvMod289(i);
-  vec4 p = lvPermute(lvPermute(lvPermute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-  float n_ = 0.142857142857;
-  vec3 ns = n_ * D.wyz - D.xzx;
-  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
-  vec4 x_ = floor(j * ns.z);
-  vec4 y_ = floor(j - 7.0 * x_);
-  vec4 x = x_ * ns.x + ns.yyyy;
-  vec4 y = y_ * ns.x + ns.yyyy;
-  vec4 h = 1.0 - abs(x) - abs(y);
-  vec4 b0 = vec4(x.xy, y.xy);
-  vec4 b1 = vec4(x.zw, y.zw);
-  vec4 s0 = floor(b0) * 2.0 + 1.0;
-  vec4 s1 = floor(b1) * 2.0 + 1.0;
-  vec4 sh = -step(h, vec4(0.0));
-  vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
-  vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
-  vec3 p0 = vec3(a0.xy, h.x);
-  vec3 p1 = vec3(a0.zw, h.y);
-  vec3 p2 = vec3(a1.xy, h.z);
-  vec3 p3 = vec3(a1.zw, h.w);
-  vec4 norm = lvTaylor(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
-  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
-  vec4 m = max(0.5 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
-  m = m * m;
-  return 105.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+const SHARED = /* glsl */ `
+uniform mat3 uInvOut; uniform mat3 uInvIn;
+// sRGB -> linear (the textures are sampled raw)
+vec3 lvDecode(vec3 c){ return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, vec3(lessThanEqual(c, vec3(0.04045)))); }
+// inverse of the ACES fit in FinalShader: the scene value that the final pass turns into lin
+vec3 lvToScene(vec3 lin){
+  vec3 y = clamp(uInvOut * lin, 0.0, 0.995);
+  vec3 A = 1.0 - 0.983729 * y;
+  vec3 B = 0.0245786 - 0.4329510 * y;
+  vec3 C = -(0.000090537 + 0.238081 * y);
+  vec3 v = (-B + sqrt(B * B - 4.0 * A * C)) / (2.0 * A);
+  return max(uInvIn * v * 0.6, 0.0);
 }
 `;
 
-const FIELD = /* glsl */ `
-uniform float uTime; uniform float uAmp; uniform float uRipple; uniform float uAspect; uniform vec2 uMouse;
-${NOISE}
-// displacement along the normal: slow pour + finer drift + a ring wave around the cursor (screen space)
-float lvField(vec3 p){
-  float n = lvNoise(p * 0.7 + vec3(0.0, uTime * 0.22, uTime * 0.05)) * uAmp;
-  n += lvNoise(p * 1.9 - vec3(uTime * 0.14)) * uAmp * 0.3;
-  vec4 c = projectionMatrix * viewMatrix * modelMatrix * vec4(p, 1.0);
-  vec2 d2 = (c.xy / c.w - uMouse) * vec2(uAspect, 1.0);
-  float d = length(d2);
-  n += sin(d * 34.0 - uTime * 7.5) * exp(-d * 8.5) * uRipple;
-  return n;
-}
-`;
-
-function buildGeometry() {
-  const raw = Uint8Array.from(atob(HELIX.data), (c) => c.charCodeAt(0)).buffer;
-  const n = HELIX.vertices;
-  const q = new Int16Array(raw, 0, n * 3);
-  const nq = new Int8Array(raw, n * 6, n * 3);
-  let off = n * 9;
-  off += (4 - (off % 4)) % 4;
-  const idx = HELIX.index32 ? new Uint32Array(raw, off, HELIX.triangles * 3) : new Uint16Array(raw, off, HELIX.triangles * 3);
-  const pos = new Float32Array(n * 3);
-  const min = HELIX.min;
-  const span = HELIX.max.map((v, k) => v - min[k]);
-  // centre the helix on the origin so it spins around its own axis
-  const centre = HELIX.max.map((v, k) => (v + min[k]) / 2);
-  for (let i = 0; i < n; i++) {
-    for (let k = 0; k < 3; k++) pos[i * 3 + k] = ((q[i * 3 + k] + 32768) / 65535) * span[k] + min[k] - centre[k];
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(nq), 3, true));
-  g.setIndex(new THREE.BufferAttribute(idx.slice(), 1));
-  g.computeBoundingSphere();
-  return { geometry: g, height: span[1], radius: Math.max(span[0], span[2]) / 2 };
-}
-
-// Glass for the droplets: the environment seen through the surface, with a slightly different index per
-// channel (a hint of dispersion), mixed with the reflection by a Fresnel term.
-const GLASS = /* glsl */ `
-vec3 lvEnv(vec3 dirView, float rough){
-  return textureCubeUV(envMap, envMapRotation * inverseTransformDirection(dirView, viewMatrix), rough).rgb;
-}
-vec3 lvRefract(vec3 n, vec3 v, float eta, float spread, float rough){
-  vec3 i = -v;
-  return vec3(
-    lvEnv(refract(i, n, eta * (1.0 - spread)), rough).r,
-    lvEnv(refract(i, n, eta), rough).g,
-    lvEnv(refract(i, n, eta * (1.0 + spread)), rough).b);
-}
-`;
-
-// Studio as a direction -> radiance function, rendered once into a PMREM.
-// +z points behind the camera, -z behind the helix, +y up. The room is dark; the light comes from a white cyc
-// behind the helix, a big overhead softbox and two tall strips behind the camera. So faces turned to the lens
-// mirror the dark room, grazing edges pick up the white cyc, rung tops catch the overhead light, and the glass
-// layer lets the white cyc show through, as in a high-key glass shot.
-const STUDIO_FRAG = /* glsl */ `
-varying vec3 vDir;
-uniform float uRoom; uniform float uWall; uniform float uCyc; uniform float uTop; uniform float uStrip;
+const VERT = /* glsl */ `
+varying vec2 vUv; varying vec2 vNdc;
 void main(){
-  vec3 d = normalize(vDir);
-  // dark room, a little lighter higher up, with grey side walls for the midtones
-  vec3 c = vec3(uRoom * (0.6 + 0.8 * clamp(d.y * 0.5 + 0.5, 0.0, 1.0)));
-  c = mix(c, vec3(uWall), smoothstep(0.55, 0.85, abs(d.x)) * smoothstep(0.6, 0.3, abs(d.y)));
-  c = mix(c, vec3(uCyc), smoothstep(-0.15, -0.6, d.z));
-  c += uTop * smoothstep(0.45, 0.85, d.y);
-  float band = step(0.35, d.z) * smoothstep(0.75, 0.6, abs(d.y));
-  c += uStrip * smoothstep(0.07, 0.04, abs(d.x - 0.36)) * band;
-  c += uStrip * 0.7 * smoothstep(0.035, 0.015, abs(d.x + 0.46)) * band;
-  c = mix(c, vec3(0.02), smoothstep(-0.06, -0.32, d.y));
-  gl_FragColor = vec4(c * vec3(0.985, 0.99, 1.0), 1.0);
+  vUv = uv;
+  vec4 c = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vNdc = c.xy / c.w;
+  gl_Position = c;
 }`;
 
-export const STUDIO = { room: 0.09, wall: 0.55, cyc: 1.8, top: 3.2, strip: 3.5 };
+const STRIP_FRAG = /* glsl */ `
+uniform sampler2D uTex; uniform float uRepeat; uniform float uOffset; uniform float uOpacity;
+uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
+varying vec2 vUv; varying vec2 vNdc;
+${SHARED}
+void main(){
+  vec2 uv = vec2(vUv.x, vUv.y * uRepeat + uOffset);
+  // the glass keeps moving a little, like poured liquid that has not quite set
+  uv.x += (sin(uv.y * 31.0 + uTime * 1.1) * 0.0016 + sin(uv.y * 13.0 - uTime * 0.7) * 0.0012) * uFlow;
+  // ring ripples around the cursor, in screen space
+  vec2 d2 = (vNdc - uMouse) * vec2(uAspect, 1.0);
+  float d = length(d2);
+  float w = sin(d * 38.0 - uTime * 7.5) * exp(-d * 7.0) * uRipple;
+  uv += normalize(d2 + 1e-5) * w * vec2(0.035, 0.012);
+  vec4 t = texture2D(uTex, uv);
+  if (t.a < 0.002) discard;
+  float a = t.a * uOpacity;
+  gl_FragColor = vec4(lvToScene(lvDecode(t.rgb / t.a)) * a, a);
+}`;
 
-function buildEnvironment(renderer, o = STUDIO) {
-  const scene = new THREE.Scene();
-  const m = new THREE.Mesh(
-    new THREE.SphereGeometry(50, 64, 32),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      uniforms: { uRoom: { value: o.room }, uWall: { value: o.wall }, uCyc: { value: o.cyc }, uTop: { value: o.top }, uStrip: { value: o.strip } },
-      vertexShader: /* glsl */ `varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: STUDIO_FRAG,
-    })
-  );
-  scene.add(m);
-  const pm = new THREE.PMREMGenerator(renderer);
-  const rt = pm.fromScene(scene, 0.0);
-  pm.dispose();
-  m.geometry.dispose();
-  m.material.dispose();
-  return rt.texture;
+const DROP_FRAG = /* glsl */ `
+uniform sampler2D uTex; uniform float uOpacity;
+varying vec2 vUv; varying vec2 vNdc;
+${SHARED}
+void main(){
+  vec4 t = texture2D(uTex, vUv);
+  if (t.a < 0.002) discard;
+  float a = t.a * uOpacity;
+  gl_FragColor = vec4(lvToScene(lvDecode(t.rgb / t.a)) * a, a);
+}`;
+
+// rows of the matrices in FinalShader (it lists them by column), inverted once here
+const OUT_INV = new THREE.Matrix3().set(1.60475, -0.53108, -0.07367, -0.10208, 1.10813, -0.00605, -0.00327, -0.07276, 1.07602).invert();
+const IN_INV = new THREE.Matrix3().set(0.59719, 0.35458, 0.04823, 0.076, 0.90834, 0.01566, 0.0284, 0.13383, 0.83777).invert();
+
+function loadTexture(renderer, url, repeatY) {
+  return new THREE.TextureLoader().loadAsync(url).then((t) => {
+    t.colorSpace = THREE.NoColorSpace; // sampled as stored; the shader decodes
+    t.premultiplyAlpha = true; // clean filtering at the transparent edges
+    t.wrapS = THREE.ClampToEdgeWrapping;
+    t.wrapT = repeatY ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+    t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.generateMipmaps = true;
+    return t;
+  });
+}
+
+function material(fragmentShader, uniforms) {
+  return new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: VERT,
+    fragmentShader,
+    transparent: true,
+    premultipliedAlpha: true,
+    depthTest: false,
+    depthWrite: false,
+  });
 }
 
 // Light studio backdrop for Home: a screen-filling cyc, brightest behind the helix and falling off to soft grey.
@@ -180,149 +125,105 @@ function buildBackdrop() {
 }
 
 export class Helix {
-  constructor(renderer, { mobile = false, reduced = false }) {
+  static async create(renderer, opts) {
+    const [strip, drop] = await Promise.all([loadTexture(renderer, stripUrl, true), loadTexture(renderer, dropUrl, false)]);
+    return new Helix(strip, drop, opts);
+  }
+
+  constructor(strip, drop, { mobile = false, reduced = false }) {
     this.mobile = mobile;
     this.reduced = reduced;
-    this.spin = 0;
+    this.offset = 0.37; // where in the period the strip starts
     this.spinVel = 0;
     this.ripple = 0;
     this.lastPointer = null;
-    this.renderer = renderer;
-    this.env = buildEnvironment(renderer);
+    this.unit = 1;
+    // turning by one radian scrolls this fraction of the strip
+    this.perRadian = 1 / (2 * Math.PI * META.turns);
 
-    const { geometry, height, radius } = buildGeometry();
-    this.height = height;
-    this.radius = radius;
-
+    const shared = () => ({ uInvOut: { value: OUT_INV }, uInvIn: { value: IN_INV } });
     this.uniforms = {
+      ...shared(),
+      uTex: { value: strip },
+      uRepeat: { value: 1 },
+      uOffset: { value: this.offset },
+      uOpacity: { value: 0 },
       uTime: { value: 0 },
-      uAmp: { value: reduced ? 0.008 : 0.016 },
       uRipple: { value: 0 },
-      uAspect: { value: 1 },
       uMouse: { value: new THREE.Vector2(9, 9) },
+      uAspect: { value: 1 },
+      uFlow: { value: reduced ? 0 : 1 },
     };
-
-    this.material = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0.95, 0.96, 0.97),
-      metalness: 1,
-      roughness: 0.05,
-      envMap: this.env,
-      envMapIntensity: 1.0,
-      transparent: true, // drawn after the backdrop
-    });
-    this.material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, this.uniforms);
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>\n${FIELD}`)
-        .replace(
-          '#include <beginnormal_vertex>',
-          /* glsl */ `#include <beginnormal_vertex>
-          float lvE = 0.05;
-          float lvF = lvField(position);
-          vec3 lvG = vec3(
-            lvField(position + vec3(lvE, 0.0, 0.0)) - lvF,
-            lvField(position + vec3(0.0, lvE, 0.0)) - lvF,
-            lvField(position + vec3(0.0, 0.0, lvE)) - lvF) / lvE;
-          objectNormal = normalize(objectNormal - (lvG - dot(lvG, objectNormal) * objectNormal));`
-        )
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normal * lvF;');
-    };
-    this.material.customProgramCacheKey = () => 'lv-helix';
-
-    this.mesh = new THREE.Mesh(geometry, this.material);
-    this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 11;
-    this.backdrop = buildBackdrop();
-    this.inner = new THREE.Group();
-    this.inner.add(this.mesh);
+    this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material(STRIP_FRAG, this.uniforms));
+    this.strip.frustumCulled = false;
+    this.strip.renderOrder = 11;
     this.group = new THREE.Group();
-    this.group.add(this.inner);
+    this.group.add(this.strip);
     this.group.visible = false;
+    this.backdrop = buildBackdrop();
 
-    // clear glass droplets: the studio seen through them (upside down, as through a lens), a bright rim
+    // droplets, placed in helix diameters from its centre: [x, y, size]
     this.drops = [];
-    const glass = new THREE.MeshPhysicalMaterial({
-      color: 0xffffff,
-      metalness: 1,
-      roughness: 0.0,
-      envMap: this.env,
-      envMapIntensity: 1.0,
-      transparent: true,
-      depthWrite: false,
-    });
-    glass.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <envmap_physical_pars_fragment>', `#include <envmap_physical_pars_fragment>\n${GLASS}`)
-        .replace(
-          '#include <opaque_fragment>',
-          /* glsl */ `{
-            vec3 lvV = normalize(vViewPosition);
-            float lvC = clamp(dot(normal, lvV), 0.0, 1.0);
-            vec3 lvT = lvRefract(normal, lvV, 1.0 / 1.5, 0.03, 0.02) * vec3(0.96, 0.975, 0.99);
-            float lvF = 0.05 + 0.95 * pow(1.0 - lvC, 4.0);
-            outgoingLight = mix(lvT, outgoingLight, lvF);
-          }
-          #include <opaque_fragment>`
-        );
-    };
-    glass.customProgramCacheKey = () => 'lv-glass';
-    const sphere = new THREE.SphereGeometry(1, 48, 32);
     const layout = mobile
-      ? [[1.9, 0.9, 0.6, 0.22], [-1.7, -1.4, 0.9, 0.16]]
-      : [[1.55, 2.3, 0.9, 0.28], [-1.45, -0.9, 1.1, 0.2], [1.6, -3.2, -0.4, 0.15]];
-    for (const [x, y, z, r] of layout) {
-      const d = new THREE.Mesh(sphere, glass);
-      d.scale.setScalar(r);
-      d.position.set(x, y, z);
-      d.userData.base = new THREE.Vector3(x, y, z);
-      d.userData.phase = Math.random() * 6.28;
+      ? [[-1.05, 0.16, 0.17], [0.44, -0.62, 0.13]]
+      : [[-0.6, 0.85, 0.19], [0.6, 0.3, 0.14], [-0.75, -0.8, 0.16]];
+    this.dropGroup = new THREE.Group();
+    for (const [x, y, size] of layout) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material(DROP_FRAG, { ...shared(), uTex: { value: drop }, uOpacity: { value: 0 } }));
       d.frustumCulled = false;
       d.renderOrder = 12;
-      this.group.add(d);
+      d.userData = { x, y, size, phase: Math.random() * 6.28 };
       this.drops.push(d);
+      this.dropGroup.add(d);
     }
+    this.group.add(this.dropGroup);
   }
 
-  // for tuning in the console: __louver.stage.helix.relight({ cyc: 2 }) (with ?bench)
-  relight(o) {
-    const old = this.env;
-    this.env = buildEnvironment(this.renderer, { ...STUDIO, ...o });
-    this.material.envMap = this.env;
-    for (const d of this.drops) d.material.envMap = this.env;
-    old.dispose();
+  // diameter: outer helix diameter in world units; length: how much of it to show along its axis
+  layout(diameter, length) {
+    const s = diameter / META.outer;
+    this.strip.scale.set(META.tile[0] * s, length, 1);
+    this.uniforms.uRepeat.value = length / (META.tile[1] * s);
+    this.unit = diameter;
   }
 
   dragBy(dxPixels) {
-    const v = dxPixels * 0.0065;
-    this.spin += v;
+    const v = dxPixels * 0.006; // radians
+    this.offset += v * this.perRadian;
     this.spinVel = this.spinVel * 0.6 + v * 5;
   }
 
-  update(dt, time, pointer, aspect) {
+  // show: 0..1 fade; tilt: the group's lean, so droplets can stay upright
+  update(dt, time, pointer, aspect, show, tilt) {
     const u = this.uniforms;
     u.uTime.value = this.reduced ? 0 : time;
     u.uAspect.value = aspect;
-    // ripples follow pointer speed, linger, then settle
+    u.uOpacity.value = show;
     let speed = 0;
     if (pointer.has) {
       if (this.lastPointer) speed = Math.hypot(pointer.x - this.lastPointer.x, pointer.y - this.lastPointer.y) / Math.max(dt, 1e-3);
       this.lastPointer = { x: pointer.x, y: pointer.y };
       u.uMouse.value.set(pointer.x, pointer.y);
     }
-    const target = this.reduced ? 0 : Math.min(0.055, speed * 0.02);
-    const rate = target > this.ripple ? 6 : 1.4;
-    this.ripple += (target - this.ripple) * (1 - Math.exp(-dt * rate));
+    const target = this.reduced ? 0 : Math.min(0.06, speed * 0.022);
+    this.ripple += (target - this.ripple) * (1 - Math.exp(-dt * (target > this.ripple ? 6 : 1.3)));
     u.uRipple.value = this.ripple;
 
-    // slow idle spin plus drag inertia
+    // slow idle spin plus drag inertia, as scroll along the strip
     this.spinVel *= Math.exp(-dt * 2.8);
-    this.spin += ((this.reduced ? 0 : 0.14) + this.spinVel) * dt;
-    this.inner.rotation.y = this.spin;
+    this.offset += ((this.reduced ? 0 : 0.3) + this.spinVel) * dt * this.perRadian;
+    this.offset -= Math.floor(this.offset);
+    u.uOffset.value = this.offset;
 
+    // droplets stay upright while the strip leans, and bob gently
+    this.dropGroup.rotation.z = -tilt;
+    const D = this.unit;
+    const bob = this.reduced ? 0 : 1;
     for (const d of this.drops) {
-      const b = d.userData.base;
-      const ph = d.userData.phase;
-      d.position.set(b.x + Math.sin(time * 0.3 + ph) * 0.15, b.y + Math.sin(time * 0.45 + ph) * 0.25, b.z + Math.cos(time * 0.35 + ph) * 0.15);
+      const { x, y, size, phase } = d.userData;
+      d.position.set((x + Math.sin(time * 0.3 + phase) * 0.03 * bob) * D, (y + Math.sin(time * 0.45 + phase) * 0.05 * bob) * D, 0);
+      d.scale.setScalar(size * D);
+      d.material.uniforms.uOpacity.value = show;
     }
   }
 }

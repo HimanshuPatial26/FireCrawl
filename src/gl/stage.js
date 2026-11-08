@@ -19,7 +19,7 @@ const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 
 // Scene states. Every value is tweened, so any state can blend into any other.
 const MODES = {
-  // home: the louver wall closes away and the liquid-metal helix takes its place
+  // home: the louver wall closes away and the glass helix in its light studio takes its place
   home: { home: 1, hero: 0, about: 0, dim: 0.08, open: 0, arc: 0.9, gap: 0.24, mouseAmt: 0, glow: 0.16, orb: 0 },
   work: { home: 0, hero: 0, about: 0, dim: 0, open: 1, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0 },
   project: { home: 0, hero: 1, about: 0, dim: 0.78, open: 1, arc: 0, gap: 0.035, mouseAmt: 0, glow: 0.5, orb: 0 },
@@ -89,7 +89,7 @@ export class Stage {
     this.initFloor();
     this.initDust();
     this.initOrb();
-    this.helix = null; // loaded in prepare() so the mesh stays out of the first script download
+    this.helix = null; // loaded in prepare() so its renders stay out of the first script download
     this.initPost();
     this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
 
@@ -713,7 +713,7 @@ export class Stage {
     if (this.helix) return;
     try {
       const { Helix } = await import('./helix.js');
-      this.helix = new Helix(this.renderer, { mobile: this.mobile, reduced: this.reduced });
+      this.helix = await Helix.create(this.renderer, { mobile: this.mobile, reduced: this.reduced });
       this.scene.add(this.helix.group, this.helix.backdrop);
     } catch (err) {
       console.warn('Helix could not be loaded; Home shows the scene without it.', err);
@@ -890,7 +890,7 @@ export class Stage {
     this.orb.rotation.y = p.sx * 0.28;
     this.orb.rotation.x = -p.sy * 0.12;
 
-    // chrome-glass helix (Home hero) in its light studio, on the right of the text (top right on phones)
+    // glass helix (Home hero) in its light studio, on the right of the text (top right on phones)
     const hx = this.helix;
     if (hx) {
       hx.group.visible = st.home > 0.01;
@@ -898,18 +898,14 @@ export class Stage {
     }
     if (hx && hx.group.visible) {
       const k = st.home;
-      const scale = this.mobile ? (visH * 0.2) / (hx.radius * 2) : (visH * 0.42) / (hx.radius * 2);
-      hx.group.scale.setScalar(scale * (0.88 + 0.12 * k));
-      const sink = (1 - k) * 4;
-      if (this.mobile) {
-        // phones: the helix lies in the band above the text, rising to the top right corner
-        hx.group.position.set(visW * 0.13, visH * 0.325, -sink);
-        hx.group.rotation.set(0.15 + p.sy * 0.04, 0, -1.04 + p.sx * 0.03);
-      } else {
-        hx.group.position.set(visW * 0.27, -sink * 0.3, -sink);
-        hx.group.rotation.set(0.1 - p.sy * 0.06, p.sx * 0.1, -0.12 + p.sx * 0.025);
-      }
-      hx.update(dt, this.time, p, cam.aspect);
+      // outer diameter on screen, and enough length to run past the screen edges at its lean
+      const diameter = (this.mobile ? visH * 0.2 : visH * 0.43) * (0.94 + 0.06 * k);
+      hx.layout(diameter, this.mobile ? Math.hypot(visW, visH) * 1.4 : visH * 1.6);
+      const tilt = this.mobile ? -1.04 + p.sx * 0.02 : -0.09 + p.sx * 0.015;
+      if (this.mobile) hx.group.position.set(visW * 0.13 + p.sx * visW * 0.01, visH * 0.325, 0);
+      else hx.group.position.set(visW * 0.27 + p.sx * visW * 0.008, -(1 - k) * visH * 0.05 - p.sy * visH * 0.006, 0);
+      hx.group.rotation.set(0, 0, tilt);
+      hx.update(dt, this.time, p, cam.aspect, k, tilt);
     }
     if (hx && hx.backdrop.visible) {
       const bu = hx.backdrop.material.uniforms;

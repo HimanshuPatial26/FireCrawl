@@ -3,8 +3,8 @@
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
-  Home is set in a light studio: a liquid-chrome DNA helix, modelled in Blender and rendered live, stands on the
-  right with glass droplets around it. The surface keeps flowing, the cursor sends ripples across it, and dragging
+  Home is set in a light studio: a glass DNA helix, modelled and path traced in Blender, stands on the right with
+  glass droplets around it. The surface keeps flowing, the cursor sends ripples across it, and dragging
   spins it. Leaving Home fades the studio into the dark pages.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
@@ -81,19 +81,26 @@ This rewrites `src/gl/portrait-data.js`.
 
 ### Helix
 
-The Home helix is modelled in Blender, run headless through its Python module (needs Python 3.13):
+The Home helix is modelled and rendered in Blender (Cycles), run headless through its Python module
+(needs Python 3.13), then encoded for the site with Pillow:
 
 ```bash
 pip install bpy==5.2.3 numpy
 ```
 
 ```bash
-python scripts/make-helix.py --preview-light helix-light.png --preview-dark helix-dark.png
+python scripts/make-helix.py --strip helix-strip.png --drop helix-drop.png --dispersion --meta helix-meta.json
 ```
 
-This rewrites `src/gl/helix-data.js` (about 100,000 triangles; `--target-tris` changes that, `--pitch`, `--turns` and
-`--seed` reshape it) and renders two Cycles previews, in a white and a dark studio. The site loads the mesh as a separate chunk, so the rest of
-the page does not wait for it.
+```bash
+python3 scripts/encode-helix.py helix-strip.png helix-drop.png --meta helix-meta.json
+```
+
+The page spins the helix without a 3D model: a helix turning about its axis looks the same as one sliding along it,
+so the site scrolls one seamless render of two turns (`src/assets/helix-strip.webp`). Everything in the script is
+built to repeat along the axis so the strip has no seam. `--preview helix-preview.png` renders a perspective close-up
+for look development, and `--look '{"absorb": 3}'` overrides the studio or glass settings (see `LOOK` in the script).
+A full strip render with `--dispersion` takes about ten minutes on four CPU cores.
 
 ## What is in the box
 
@@ -102,7 +109,7 @@ the page does not wait for it.
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Chrome DNA helix and light studio (Home): flowing surface, cursor ripples, drag to spin | `src/gl/helix.js` (studio lighting in `STUDIO_FRAG`), `scripts/make-helix.py` |
+| Glass DNA helix and light studio (Home): Blender render, scroll-to-spin, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |

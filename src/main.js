@@ -473,7 +473,7 @@ async function enterHome(prev) {
   document.title = `${site.name} · ${site.role}`;
   live.textContent = `${site.name}, ${site.role}. ${site.availability}.`;
 
-  // the hero cycles through the three pillars: scene colour, helix rim and the highlighted result move together
+  // the hero cycles through the three pillars: accent colour and the highlighted result move together
   const seq = site.proof.map((p) => projects.findIndex((x) => x.slug === p.slug)).filter((i) => i >= 0);
   let k = -1;
   let paused = false;
