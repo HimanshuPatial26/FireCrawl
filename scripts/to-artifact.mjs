@@ -5,9 +5,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const src = readFileSync('dist-single/index.html', 'utf8');
 const out = src
   .replace(/<!doctype html>/i, '')
-  .replace(/<\/?html[^>]*>/gi, '')
-  .replace(/<\/?head[^>]*>/gi, '')
-  .replace(/<\/?body[^>]*>/gi, '')
+  .replace(/<\/?html(\s[^>]*)?>/gi, '')
+  .replace(/<\/?head(\s[^>]*)?>/gi, '') // not <header>
+  .replace(/<\/?body(\s[^>]*)?>/gi, '')
   .replace(/<meta charset="[^"]*"\s*\/?>/i, '')
   .replace(/<meta name="viewport"[^>]*>/i, '')
   .trim();
