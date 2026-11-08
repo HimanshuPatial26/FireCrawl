@@ -8,7 +8,6 @@ import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { Fluid } from './fluid.js';
 import * as S from './shaders.js';
 import { PORTRAIT } from './portrait-data.js';
-import { FlipWall } from './flipwall.js';
 
 // Louver wall size in world units (16:9)
 const W = 9.6;
@@ -20,9 +19,8 @@ const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 
 // Scene states. Every value is tweened, so any state can blend into any other.
 const MODES = {
-  // home: wall to the right, centre closed and edges partly open so the backlight leaks through
-  // home: the louver wall closes away and the kinetic flip-panel wall takes its place
-  home: { home: 1, hero: 0, about: 0, dim: 0.08, open: 0, arc: 0.9, gap: 0.24, mouseAmt: 0, glow: 0.95, orb: 0 },
+  // home: the louver wall closes away and the liquid-metal helix takes its place
+  home: { home: 1, hero: 0, about: 0, dim: 0.08, open: 0, arc: 0.9, gap: 0.24, mouseAmt: 0, glow: 0.16, orb: 0 },
   work: { home: 0, hero: 0, about: 0, dim: 0, open: 1, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0 },
   project: { home: 0, hero: 1, about: 0, dim: 0.78, open: 1, arc: 0, gap: 0.035, mouseAmt: 0, glow: 0.5, orb: 0 },
   about: { home: 0, hero: 0, about: 1, dim: 0.45, open: 0, arc: 0.55, gap: 0.3, mouseAmt: 0, glow: 0.45, orb: 1 },
@@ -91,8 +89,7 @@ export class Stage {
     this.initFloor();
     this.initDust();
     this.initOrb();
-    this.wall = new FlipWall({ mobile, reduced, colors: this.colors });
-    this.scene.add(this.wall.group);
+    this.helix = null; // loaded in prepare() so the mesh stays out of the first script download
     this.initPost();
     this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
 
@@ -383,7 +380,8 @@ export class Stage {
     c.addPass(ov);
     this.distort = new ShaderPass(S.DistortShader);
     c.addPass(this.distort);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), this.mobile ? 0.6 : 0.7, 0.6, 0.78);
+    this.bloomBase = this.mobile ? 0.6 : 0.7;
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), this.bloomBase, 0.6, 0.78);
     c.addPass(this.bloom);
     // tone mapping, sRGB, vignette, grain and fades in a single full-screen pass
     this.finalPass = new ShaderPass(S.FinalShader);
@@ -711,7 +709,19 @@ export class Stage {
   }
 
   // Compile every program during the preloader so no page pays a first-use shader stall.
-  prepare() {
+  async loadHelix() {
+    if (this.helix) return;
+    try {
+      const { Helix } = await import('./helix.js');
+      this.helix = new Helix(this.renderer, { mobile: this.mobile, reduced: this.reduced, colors: this.colors });
+      this.scene.add(this.helix.group);
+    } catch (err) {
+      console.warn('Helix could not be loaded; Home shows the scene without it.', err);
+    }
+  }
+
+  async prepare() {
+    await this.loadHelix();
     this.update(1 / 60);
     const warm = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
@@ -734,13 +744,13 @@ export class Stage {
     );
     this.overlay.add(warm);
     this.orb.visible = true;
-    this.wall.group.visible = true;
+    if (this.helix) this.helix.group.visible = true;
     const r = this.renderer;
     const compile = (scene, cam) => (r.compileAsync ? r.compileAsync(scene, cam) : Promise.resolve(r.compile(scene, cam)));
     return Promise.all([compile(this.scene, this.camera), compile(this.overlay, this.ortho)])
       .catch(() => {})
       .then(() => {
-        this.state.orb = 0.0011; // render the orb, wall and media programs once while the screen is still black
+        this.state.orb = 0.0011; // render the orb, helix and media programs once while the screen is still black
         this.state.home = 0.02;
         this.update(1 / 60);
         this.state.orb = 0;
@@ -852,7 +862,7 @@ export class Stage {
     const slatsGone = st.home > 0.985;
     this.slats.visible = !heroHidden && !slatsGone;
     // on phones the floor sits behind the hero text, so its reflection stays faint there
-    const floorDim = Math.max(st.dim, st.hero * 0.92, st.about * 0.7, this.mobile ? st.home * 0.75 : 0);
+    const floorDim = Math.max(st.dim, st.hero * 0.92, st.about * 0.7, this.mobile ? st.home * 0.95 : 0);
     const fu = this.floor.material.uniforms;
     fu.uTime.value = this.time;
     fu.uDim.value = floorDim;
@@ -875,18 +885,26 @@ export class Stage {
     this.orb.rotation.y = p.sx * 0.28;
     this.orb.rotation.x = -p.sy * 0.12;
 
-    // kinetic flip wall (Home hero): right of the text on desktop, above it on phones
-    const wall = this.wall;
-    wall.group.visible = st.home > 0.01;
-    if (wall.group.visible) {
-      const ww = this.mobile ? visW * 0.94 : visW * 0.46;
-      wall.group.scale.setScalar(ww / wall.width);
-      const back = (1 - st.home) * 3;
-      if (this.mobile) wall.group.position.set(0, visH * 0.22, -0.4 - back);
-      else wall.group.position.set(visW * 0.245, visH * 0.05, -0.4 - back);
-      wall.group.rotation.set(-p.sy * 0.06, (this.mobile ? 0 : -0.2) + p.sx * 0.1, 0);
-      wall.update(dt, this.time, cam, p, st.home, st.dim);
-    } else wall.hit = false;
+    // liquid-metal helix (Home hero): right of the text on desktop, diagonal across the top on phones
+    const hx = this.helix;
+    if (hx) hx.group.visible = st.home > 0.01;
+    if (hx && hx.group.visible) {
+      const k = st.home;
+      const scale = this.mobile ? (visH * 0.22) / (hx.radius * 2) : (visH * 0.37) / (hx.radius * 2);
+      hx.group.scale.setScalar(scale * (0.85 + 0.15 * k));
+      const sink = (1 - k) * 4;
+      if (this.mobile) {
+        hx.group.position.set(0, visH * 0.25, -sink);
+        hx.group.rotation.set(0.15 + p.sy * 0.05, 0, -1.08 + p.sx * 0.04);
+      } else {
+        hx.group.position.set(visW * 0.27, -sink * 0.3, -sink);
+        hx.group.rotation.set(0.2 - p.sy * 0.08, p.sx * 0.12, -0.26 + p.sx * 0.03);
+      }
+      hx.update(dt, this.time, p, cam.aspect);
+    }
+    // bloom turns chrome into milk: fade it out as the helix takes over, and skip the pass once it is gone
+    this.bloom.strength = this.bloomBase * (1 - st.home);
+    this.bloom.enabled = st.home < 0.985;
 
     // fluid: simulate while the pointer moves, then rest once the field has settled
     if (st.fluid > 0.01 && !this.reduced) {

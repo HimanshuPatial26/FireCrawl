@@ -217,9 +217,9 @@ function setupCursor() {
     cy += (y - cy) * k;
     c.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
     const onWork = app.route?.name === 'work' && !c.classList.contains('is-link');
-    const onWall = app.route?.name === 'home' && stage?.wall.hit && !c.classList.contains('is-link');
-    const text = drag.dir ? 'Release' : onWork ? 'Drag' : onWall ? 'Open' : '';
-    c.classList.toggle('is-wall', !!onWall);
+    const onHelix = app.route?.name === 'home' && finePointer && x > innerWidth * 0.5 && !c.classList.contains('is-link');
+    const text = drag.dir ? 'Release' : onWork || onHelix ? 'Drag' : '';
+    c.classList.toggle('is-spin', !!onHelix && !!spin.on);
     if (label.textContent !== text) label.textContent = text;
     c.classList.toggle('has-label', !!text);
     c.classList.toggle('is-drag', !!drag.on);
@@ -401,7 +401,6 @@ async function leave(prev, next) {
   app.cleanup = [];
   if (!prev) return;
   const el = view.firstElementChild;
-  if (prev.name === 'home') stage?.wall.show('', { duration: 0.9 });
   if (prev.name === 'work') await workOut();
   else if (el) {
     const toNextProject = prev.name === 'project' && next.name === 'project';
@@ -460,26 +459,19 @@ async function enterHome(prev) {
   document.title = `${site.name} · ${site.role}`;
   live.textContent = `${site.name}, ${site.role}. ${site.availability}.`;
 
-  // the flip wall cycles: initials, then each headline result in its pillar's colour
-  const initials = site.name.split(/\s+/).map((w) => w[0]).join('').toUpperCase();
-  const seq = [{ text: initials, slug: null }, ...site.proof.map((p) => ({ text: p.value, slug: p.slug }))];
+  // the hero cycles through the three pillars: scene colour, helix rim and the highlighted result move together
+  const seq = site.proof.map((p) => projects.findIndex((x) => x.slug === p.slug)).filter((i) => i >= 0);
   let k = -1;
   let paused = false;
   let lastShow = 0;
   const show = (n) => {
     if (n === k) return;
     k = n;
-    const it = seq[k];
-    const idx = it.slug ? projects.findIndex((p) => p.slug === it.slug) : -1;
+    const idx = seq[k];
     markProof(idx);
-    app.homeTarget = it.slug;
-    if (idx >= 0) {
-      setIndex(idx);
-      root.style.setProperty('--accent', projects[idx].colors.a);
-      stage?.crossTo(idx, 1.2);
-    }
-    stage?.wall.show(it.text);
-    sound.louvers(1.4, 24, 1);
+    setIndex(idx);
+    root.style.setProperty('--accent', projects[idx].colors.a);
+    stage?.crossTo(idx, 1.4);
     lastShow = performance.now();
   };
 
@@ -494,18 +486,17 @@ async function enterHome(prev) {
       else stage.setProject(current);
     }
     stage.setMode('home', { duration: prev ? 1.8 : 2.8 });
-    stage.wall.show('', { duration: 0.01 });
-    const first = gsap.delayedCall(D(prev ? 0.9 : 1.4), () => show(0));
+    const first = gsap.delayedCall(D(prev ? 1.2 : 2.2), () => show(Math.max(0, seq.indexOf(current))));
     const timer = setInterval(() => {
       if (app.route?.name !== 'home' || app.busy || document.hidden || paused || reduced) return;
-      if (performance.now() - lastShow > 5200) show((k + 1) % seq.length);
+      if (performance.now() - lastShow > 6000) show((k + 1) % seq.length);
     }, 400);
-    // hovering or focusing a result puts its number on the wall
+    // hovering or focusing a result switches the scene to that pillar
     const onEnter = (e) => {
       const li = e.target.closest('.h-proof li');
       if (!li) return;
       paused = true;
-      show(seq.findIndex((it) => it.slug === li.dataset.slug));
+      show(seq.indexOf(projects.findIndex((x) => x.slug === li.dataset.slug)));
     };
     const onLeave = (e) => {
       const li = e.target.closest('.h-proof li');
@@ -521,7 +512,6 @@ async function enterHome(prev) {
     app.cleanup.push(() => {
       first.kill();
       clearInterval(timer);
-      app.homeTarget = null;
     });
   }
 
@@ -949,6 +939,7 @@ async function enterLost() {
 /* Input                                                               */
 /* ------------------------------------------------------------------ */
 const drag = { on: false, x0: 0, dir: 0, p: 0, target: -1, lastX: 0, lastT: 0, v: 0, ticks: 0 };
+const spin = { on: false, x: 0 };
 
 function setupInput() {
   // Wheel and trackpad scrub the flip continuously. A short flick or one mouse notch completes it;
@@ -1021,6 +1012,26 @@ function setupInput() {
     else if (performance.now() - wheel.last > 150) finishWheel(wheel.target > 0.12);
   });
 
+  // Home: drag on the right half to spin the helix, with inertia
+  addEventListener('pointerdown', (e) => {
+    if (app.route?.name !== 'home' || !finePointer || e.button > 0 || e.clientX < innerWidth * 0.5) return;
+    if (e.target.closest('a, button')) return;
+    Object.assign(spin, { on: true, x: e.clientX });
+    root.classList.add('is-dragging');
+  });
+  addEventListener('pointermove', (e) => {
+    if (!spin.on) return;
+    stage?.helix?.dragBy(e.clientX - spin.x);
+    spin.x = e.clientX;
+  }, { passive: true });
+  const spinEnd = () => {
+    if (!spin.on) return;
+    spin.on = false;
+    root.classList.remove('is-dragging');
+  };
+  addEventListener('pointerup', spinEnd);
+  addEventListener('pointercancel', spinEnd);
+
   addEventListener('pointerdown', (e) => {
     if (app.route?.name !== 'work' || app.busy || app.flipping || e.button > 0) return;
     if (e.target.closest('a, button')) return;
@@ -1077,10 +1088,6 @@ function setupInput() {
     app.flipping = false;
   };
   addEventListener('pointerup', end);
-  addEventListener('click', (e) => {
-    if (app.route?.name !== 'home' || !stage?.wall.hit || e.target.closest('a, button')) return;
-    location.hash = app.homeTarget || 'work';
-  });
   addEventListener('pointercancel', end);
 
   addEventListener('keydown', (e) => {

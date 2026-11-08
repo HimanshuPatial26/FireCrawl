@@ -3,8 +3,8 @@
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
-  The hero is a kinetic flip-panel wall that spells out the initials and each headline result; hovering a result
-  shows it on the wall, the cursor ripples the flaps, and clicking the wall opens that case study.
+  The hero is a liquid-chrome DNA helix modelled in Blender and rendered live: the surface keeps flowing,
+  the cursor sends ripples across it, and dragging spins it.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
 - **About** (`#about`): profile, how I work, experience (including Customer Delight), education, skills and contact.
@@ -78,6 +78,22 @@ python3 scripts/make-portrait.py path/to/headshot.png --preview portrait-preview
 
 This rewrites `src/gl/portrait-data.js`.
 
+### Helix
+
+The Home helix is modelled in Blender, run headless through its Python module (needs Python 3.13):
+
+```bash
+pip install bpy==5.2.3 numpy
+```
+
+```bash
+python scripts/make-helix.py --preview-light helix-light.png --preview-dark helix-dark.png
+```
+
+This rewrites `src/gl/helix-data.js` (about 90,000 triangles; `--target-tris` changes that, `--seed` reshapes the
+broken rungs and drips) and renders two Cycles previews. The site loads the mesh as a separate chunk, so the rest of
+the page does not wait for it.
+
 ## What is in the box
 
 | Area | Where |
@@ -85,7 +101,7 @@ This rewrites `src/gl/portrait-data.js`.
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Kinetic flip-panel wall (Home hero) | `src/gl/flipwall.js`; the sequence comes from `site.proof` in `src/content.js` |
+| Liquid-metal DNA helix (Home hero): flowing surface, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |
@@ -103,7 +119,8 @@ Performance:
 - One clock drives GSAP, Lenis smooth scroll and the WebGL frame, so the page and the 3D scene never drift apart.
 - Page geometry is measured only when layout changes; scrolling never forces a layout read.
 - Procedural artwork and floor reflections refresh at half rate on alternating frames, so no single frame carries both.
-- Work nobody can see is skipped: the hero once scrolled away, reflections under a black floor, the fluid when the cursor is still.
+- Work nobody can see is skipped: the hero once scrolled away, reflections under a black floor, the fluid when the cursor is still,
+  the louver wall and bloom while the helix fills Home.
 - Resolution starts inside a pixel budget, drops when frames are missed and climbs back after sustained headroom.
 - Add `?bench` to the URL to expose `window.__louver` and per-frame GPU timings (`__louver.stage.benchTimes`).
 
