@@ -58,19 +58,24 @@ const HELIX_FRAG = /* glsl */ `
 uniform sampler2D uA; uniform sampler2D uB; uniform float uMix; uniform float uShiftA; uniform float uShiftB;
 uniform float uRepeat; uniform float uOpacity; uniform float uBg;
 uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
-uniform float uFocus; uniform float uBlur; uniform float uWidth; uniform vec4 uSafe;
+uniform float uFocus; uniform float uBlur; uniform float uWidth; uniform vec4 uSafe; uniform float uDead;
 varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 ${SHARED}
 // one frame pair at a point and mip level: frame A at its own vertical shift, frame B at its own, cross-faded
 float lvAt(vec2 p, float lod){
   return mix(textureLod(uA, vec2(p.x, p.y - uShiftA), lod).r, textureLod(uB, vec2(p.x, p.y - uShiftB), lod).r, uMix);
 }
+// the same at full detail, with the true texture gradients so the GPU's anisotropic filtering keeps the
+// helix crisp where the card is foreshortened
+float lvAtG(vec2 p, vec2 gx, vec2 gy){
+  return mix(textureGrad(uA, vec2(p.x, p.y - uShiftA), gx, gy).r, textureGrad(uB, vec2(p.x, p.y - uShiftB), gx, gy).r, uMix);
+}
 float lvNoise(vec2 px){ return fract(52.9829189 * fract(dot(px, vec2(0.06711056, 0.00583715)))); }
 void main(){
   // x across the helix, y down from the top of a frame (texture row 0 is the top of the render)
   vec2 p = vec2(vUv.x, (1.0 - vUv.y) * uRepeat);
   // the metal keeps moving a little, like poured liquid that has not quite set
-  p.x += (sin(p.y * 37.0 + uTime * 1.1) * 0.0009 + sin(p.y * 15.0 - uTime * 0.7) * 0.0007) * uFlow;
+  p.x += (sin(p.y * 37.0 + uTime * 1.1) * 0.00045 + sin(p.y * 15.0 - uTime * 0.7) * 0.00035) * uFlow;
   // ring ripples around the cursor, in screen space
   vec2 d2 = (vNdc - uMouse) * vec2(uAspect, 1.0);
   float d = length(d2);
@@ -79,18 +84,19 @@ void main(){
 
   // depth of field, as through a real lens: the blur grows with distance from the focus plane, so the end that
   // comes towards the viewer goes soft and large. Radius in texture units (the frames are square tiles).
-  // behind the focus it softens more gently, so the far end stays readable as it recedes
+  // Everything within uDead of the focus stays crisp; beyond it the blur grows, more gently behind the focus.
   float dz = vViewZ - uFocus;
-  float r = uBlur * (dz > 0.0 ? dz * 0.55 : -dz) / uWidth;
+  float dzA = max(abs(dz) - uDead, 0.0);
+  float r = uBlur * (dz > 0.0 ? dzA * 0.5 : dzA) / uWidth;
   vec2 size = vec2(textureSize(uA, 0));
-  vec2 gx = dFdx(p * size), gy = dFdy(p * size);
-  float lod = max(0.5 * log2(max(dot(gx, gx), dot(gy, gy))), log2(max(r * size.x * 0.6, 1.0)));
+  vec2 gpx = dFdx(p), gpy = dFdy(p);
+  float lod = log2(max(r * size.x * 0.6, 1.0));
 
   // lens colour fringes, as in a photograph: red and blue land a touch apart, more towards the outside and
   // more where the picture is out of focus
   float ca = (vUv.x - 0.5) * 0.007 + r * 0.04 * sign(vUv.x - 0.5);
-  float g = lvAt(p, lod);
-  vec3 c = vec3(lvAt(p + vec2(ca, 0.0), lod), g, lvAt(p - vec2(ca, 0.0), lod));
+  float g = lvAtG(p, gpx, gpy);
+  vec3 c = vec3(lvAtG(p + vec2(ca, 0.0), gpx, gpy), g, lvAtG(p - vec2(ca, 0.0), gpx, gpy));
   float k = smoothstep(0.0006, 0.004, r);
   if (k > 0.0) {
     // a rotated ring of taps on the pre-blurred mip level smooths it into a lens blur
@@ -247,6 +253,7 @@ export class Helix {
       uBend: { value: 0 },
       uLen: { value: 1 },
       uSafe: { value: new THREE.Vector4(9, 9, 9, 9) }, // off until the stage sets it
+      uDead: { value: 0 },
     };
     this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 160), material(HELIX_FRAG, this.uniforms, display ? { DISPLAY_OUT: '' } : {}));
     this.strip.frustumCulled = false;
@@ -269,6 +276,7 @@ export class Helix {
     const u = this.uniforms;
     u.uBend.value = bend;
     u.uLen.value = length;
+    u.uDead.value = diameter * 0.7; // the whole visible body stays in focus; only the far reaches soften
     u.uRepeat.value = length / (META.tile[1] * s);
     u.uWidth.value = META.tile[0] * s;
     u.uFocus.value = focus;

@@ -93,8 +93,8 @@ export class Stage {
     // Home helix placement (desktop / phone): size at its centre (fraction of the view height), lean on screen,
     // tilt towards the camera, centre position (fractions of the view), lens blur strength
     this.helixPose = mobile
-      ? { size: 0.26, lean: -0.95, tilt: 0.85, x: 0.2, y: 0.3, blur: 0.07, focus: -0.4, bend: 0.03 }
-      : { size: 0.6, lean: -0.4, tilt: 0.85, x: 0.24, y: 0.14, blur: 0.085, focus: -0.4, bend: 0.035 };
+      ? { size: 0.2, lean: -1.1, tilt: 0.32, x: 0.12, y: 0.33, blur: 0.05, focus: 0, bend: 0 }
+      : { size: 0.5, lean: -0.32, tilt: 0.42, x: 0.275, y: 0.06, blur: 0.05, focus: 0, bend: 0 };
     this.initPost();
     this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
 
