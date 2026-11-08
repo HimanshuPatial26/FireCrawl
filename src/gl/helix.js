@@ -1,18 +1,21 @@
 import * as THREE from 'three';
 import META from '../assets/helix/meta.json';
-import dropUrl from '../assets/helix/drop.webp';
 
-// Glass DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded live:
-// clear smoky glass refracting a studio and itself only looks right path traced.
+// Liquid-mercury DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded
+// live: a mirror that reflects the studio and itself only looks right path traced.
 //
 // It turns like a DNA model. The helix is built with screw symmetry (identical rungs, a surface that repeats
 // every rung step), so turning it by one rung step looks exactly like sliding it by one rung spacing. Blender
 // renders META.frames frames across that one step; this plays them in order, cross-fading between neighbours,
 // and each time it wraps around it shifts the picture by one rung spacing. The rungs stay at their height and
-// swing round. Each frame is exactly one turn and seamless top to bottom, so it tiles as tall as needed.
+// swing round. The two strands are copies, so the shape repeats every half turn: each frame is half a turn,
+// seamless top to bottom, and tiles as tall as needed.
+//
+// Frames stream in: a coarse set first (so the page can open), then the in-between ones; playback always
+// blends the nearest frames that have arrived.
 //
 // Frames are greyscale (one byte per pixel on the GPU) on a flat backdrop that the shader keys out; it adds the
-// cool tint and the colour fringes of the glass back. The renders are display-ready sRGB and the site tone maps
+// cool tint and the soft lens colour fringes back. The renders are display-ready sRGB and the site tone maps
 // the whole scene in its final pass (ACES + sRGB), so the shader undoes that curve first: what leaves the final
 // pass is the Blender render.
 
@@ -57,14 +60,14 @@ float lvAt(vec2 p){
 void main(){
   // x across the helix, y down from the top of a turn (texture row 0 is the top of the render)
   vec2 p = vec2(vUv.x, (1.0 - vUv.y) * uRepeat);
-  // the glass keeps moving a little, like poured liquid that has not quite set
+  // the metal keeps moving a little, like poured liquid that has not quite set
   p.x += (sin(p.y * 37.0 + uTime * 1.1) * 0.0009 + sin(p.y * 15.0 - uTime * 0.7) * 0.0007) * uFlow;
   // ring ripples around the cursor, in screen space
   vec2 d2 = (vNdc - uMouse) * vec2(uAspect, 1.0);
   float d = length(d2);
   float w = sin(d * 38.0 - uTime * 7.5) * exp(-d * 7.0) * uRipple;
   p += normalize(d2 + 1e-5) * w * vec2(0.03, -0.012);
-  // colour fringes of glass: red and blue land a touch apart, more towards the outside of the helix
+  // lens colour fringes, as in a photograph: red and blue land a touch apart, more towards the outside
   float ca = (vUv.x - 0.5) * 0.007;
   float g = lvAt(p);
   vec3 c = vec3(lvAt(p + vec2(ca, 0.0)), g, lvAt(p - vec2(ca, 0.0)));
@@ -74,17 +77,6 @@ void main(){
   float a = smoothstep(0.01, 0.05, max(abs(g - uBg), max(abs(c.r - uBg), abs(c.b - uBg)))) * uOpacity;
   if (a < 0.002) discard;
   gl_FragColor = vec4(lvToScene(lvDecode(c)) * a, a);
-}`;
-
-const DROP_FRAG = /* glsl */ `
-uniform sampler2D uTex; uniform float uOpacity;
-varying vec2 vUv; varying vec2 vNdc;
-${SHARED}
-void main(){
-  vec4 t = texture2D(uTex, vUv);
-  if (t.a < 0.002) discard;
-  float a = t.a * uOpacity;
-  gl_FragColor = vec4(lvToScene(lvDecode(t.rgb / t.a)) * a, a);
 }`;
 
 // rows of the matrices in FinalShader (it lists them by column), inverted once here
@@ -116,15 +108,6 @@ async function loadFrame(renderer, url) {
   t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   t.needsUpdate = true;
   return t;
-}
-
-function loadSprite(renderer, url) {
-  return new THREE.TextureLoader().loadAsync(url).then((t) => {
-    t.colorSpace = THREE.NoColorSpace; // sampled as stored; the shader decodes
-    t.premultiplyAlpha = true; // clean filtering at the transparent edges
-    t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-    return t;
-  });
 }
 
 function material(fragmentShader, uniforms) {
@@ -165,16 +148,29 @@ function buildBackdrop() {
   return mesh;
 }
 
+// load order: every sixth frame first, then every third, then the rest
+function loadOrder(n) {
+  const order = [];
+  for (const stride of [6, 3, 1]) for (let i = 0; i < n; i += stride) if (!order.includes(i)) order.push(i);
+  return order;
+}
+
 export class Helix {
   static async create(renderer, opts) {
     const urls = sorted(opts.mobile ? mobileUrls : frameUrls);
-    const frames = [];
-    for (const url of urls) frames.push(await loadFrame(renderer, url)); // one at a time keeps memory peaks low
-    const drop = await loadSprite(renderer, dropUrl);
-    return new Helix(frames, drop, opts);
+    const frames = new Array(urls.length).fill(null);
+    const order = loadOrder(urls.length);
+    const first = Math.min(6, order.length);
+    // one at a time keeps memory peaks low; the page opens once the coarse set is in
+    for (const i of order.slice(0, first)) frames[i] = await loadFrame(renderer, urls[i]);
+    const helix = new Helix(frames, opts);
+    (async () => {
+      for (const i of order.slice(first)) frames[i] = await loadFrame(renderer, urls[i]);
+    })().catch((err) => console.warn('Some helix frames did not load; the turn uses the ones that did.', err));
+    return helix;
   }
 
-  constructor(frames, drop, { mobile = false, reduced = false }) {
+  constructor(frames, { mobile = false, reduced = false }) {
     this.frames = frames;
     this.mobile = mobile;
     this.reduced = reduced;
@@ -182,14 +178,13 @@ export class Helix {
     this.spinVel = 0;
     this.ripple = 0;
     this.lastPointer = null;
-    this.unit = 1;
     this.step = THREE.MathUtils.degToRad(META.stepDegrees);
 
-    const shared = () => ({ uInvOut: { value: OUT_INV }, uInvIn: { value: IN_INV } });
     this.uniforms = {
-      ...shared(),
+      uInvOut: { value: OUT_INV },
+      uInvIn: { value: IN_INV },
       uA: { value: frames[0] },
-      uB: { value: frames[1 % frames.length] },
+      uB: { value: frames[0] },
       uMix: { value: 0 },
       uShiftA: { value: 0 },
       uShiftB: { value: 0 },
@@ -209,22 +204,6 @@ export class Helix {
     this.group.add(this.strip);
     this.group.visible = false;
     this.backdrop = buildBackdrop();
-
-    // droplets, placed in helix diameters from its centre: [x, y, size]
-    this.drops = [];
-    const layout = mobile
-      ? [[-1.05, 0.16, 0.17], [0.44, -0.62, 0.13]]
-      : [[-0.6, 0.85, 0.19], [0.6, 0.3, 0.14], [-0.75, -0.8, 0.16]];
-    this.dropGroup = new THREE.Group();
-    for (const [x, y, size] of layout) {
-      const d = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material(DROP_FRAG, { ...shared(), uTex: { value: drop }, uOpacity: { value: 0 } }));
-      d.frustumCulled = false;
-      d.renderOrder = 12;
-      d.userData = { x, y, size, phase: Math.random() * 6.28 };
-      this.drops.push(d);
-      this.dropGroup.add(d);
-    }
-    this.group.add(this.dropGroup);
   }
 
   // diameter: outer helix diameter in world units; length: how much of it to show along its axis
@@ -232,7 +211,6 @@ export class Helix {
     const s = diameter / META.outer;
     this.strip.scale.set(META.tile[0] * s, length, 1);
     this.uniforms.uRepeat.value = length / (META.tile[1] * s);
-    this.unit = diameter;
   }
 
   dragBy(dxPixels) {
@@ -241,30 +219,38 @@ export class Helix {
     this.spinVel = this.spinVel * 0.6 + v * 5;
   }
 
-  // pick the two frames around the current angle, and the rung-spacing shift of each
+  // pick the two loaded frames around the current angle, and the rung-spacing shift of each
   setTurn() {
-    const n = this.frames.length;
+    const frames = this.frames;
+    const n = frames.length;
     const steps = this.angle / this.step;
     const k = Math.floor(steps);
     const f = (steps - k) * n;
-    const i0 = Math.min(n - 1, Math.floor(f));
+    let i0 = Math.min(n - 1, Math.floor(f));
+    while (!frames[i0]) i0--; // frame 0 always loads first
     let i1 = i0 + 1;
     let k1 = k;
-    if (i1 === n) {
-      i1 = 0;
-      k1 = k + 1;
+    for (;;) {
+      if (i1 === n) {
+        i1 = 0;
+        k1 = k + 1;
+        break;
+      }
+      if (frames[i1]) break;
+      i1++;
     }
-    const per = META.rungsPerTurn;
+    const span = (k1 > k ? n : 0) + i1 - i0;
+    const per = Math.round(1 / META.shiftPerStep); // rung steps per frame height
     const u = this.uniforms;
-    u.uA.value = this.frames[i0];
-    u.uB.value = this.frames[i1];
-    u.uMix.value = f - i0;
+    u.uA.value = frames[i0];
+    u.uB.value = frames[i1];
+    u.uMix.value = (f - i0) / span;
     u.uShiftA.value = (((k % per) + per) % per) / per;
     u.uShiftB.value = (((k1 % per) + per) % per) / per;
   }
 
-  // show: 0..1 fade; tilt: the group's lean, so droplets can stay upright
-  update(dt, time, pointer, aspect, show, tilt) {
+  // show: 0..1 fade
+  update(dt, time, pointer, aspect, show) {
     const u = this.uniforms;
     u.uTime.value = this.reduced ? 0 : time;
     u.uAspect.value = aspect;
@@ -282,18 +268,8 @@ export class Helix {
     // slow idle turn plus drag inertia
     this.spinVel *= Math.exp(-dt * 2.8);
     this.angle += ((this.reduced ? 0 : 0.32) + this.spinVel) * dt;
-    this.angle %= this.step * META.rungsPerTurn * 1000; // keep it from growing without bound
+    // keep it from growing without bound, wrapping on a whole number of frame heights so nothing jumps
+    this.angle %= this.step * Math.round(1 / META.shiftPerStep) * 1000;
     this.setTurn();
-
-    // droplets stay upright while the helix leans, and bob gently
-    this.dropGroup.rotation.z = -tilt;
-    const D = this.unit;
-    const bob = this.reduced ? 0 : 1;
-    for (const d of this.drops) {
-      const { x, y, size, phase } = d.userData;
-      d.position.set((x + Math.sin(time * 0.3 + phase) * 0.03 * bob) * D, (y + Math.sin(time * 0.45 + phase) * 0.05 * bob) * D, 0);
-      d.scale.setScalar(size * D);
-      d.material.uniforms.uOpacity.value = show;
-    }
   }
 }

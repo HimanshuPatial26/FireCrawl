@@ -1,19 +1,20 @@
 {
-  "frames": 12,
+  "frames": 36,
   "stepDegrees": 20.0,
   "rungsPerTurn": 18,
   "tile": [
     2.902267,
-    5.8
+    2.9
   ],
+  "shiftPerStep": 0.1111111111111111,
   "outer": 2.46,
   "pixels": [
     1280,
-    2558
+    1279
   ],
   "background": 0.94,
   "mobilePixels": [
     640,
-    1279
+    640
   ]
 }

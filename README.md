@@ -3,8 +3,8 @@
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
-  Home is set in a light studio: a glass DNA helix, modelled and path traced in Blender, stands on the right with
-  glass droplets around it. The surface keeps flowing, the cursor sends ripples across it, and dragging
+  Home is set in a light studio: a liquid-mercury DNA helix, modelled and path traced in Blender, turns on the
+  right. The surface keeps flowing, the cursor sends ripples across it, and dragging
   spins it. Leaving Home fades the studio into the dark pages.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
@@ -89,21 +89,24 @@ pip install bpy==5.2.3 numpy
 ```
 
 ```bash
-python scripts/make-helix.py --frames helix-frames --drop helix-drop.png --dispersion
+python scripts/make-helix.py --frames helix-frames --count 36
 ```
 
 ```bash
-python3 scripts/encode-helix.py helix-frames helix-drop.png
+python3 scripts/encode-helix.py helix-frames
 ```
 
 It turns like a DNA model without a 3D model on the page. The helix is built with screw symmetry (identical
 rungs, a surface that repeats every rung step), so turning it by one rung step looks exactly like sliding it by
-one rung spacing. Blender renders 12 frames across that one step (`src/assets/helix/`); the page plays them in
-order, cross-fading neighbours, and shifts the picture by a rung spacing each time it wraps around. Each frame
-is one seamless turn, so it tiles as tall as the screen needs. Phones get half-size frames.
+one rung spacing. Blender renders 36 frames across that one step (`src/assets/helix/`); the page plays them in
+order, cross-fading neighbours, and shifts the picture by a rung spacing each time it wraps around. The two
+strands are copies, so the shape repeats every half turn: each frame is one seamless half turn and tiles as tall
+as the screen needs. Frames stream in, a coarse set first, so the page opens before they have all arrived.
+Phones get half-size frames.
 `--preview helix-preview.png` renders a perspective close-up for look development, `--check` renders one extra
 frame a full step on to verify the symmetry, and `--look '{"absorb": 2}'` overrides the studio or glass settings
-(see `LOOK` in the script). The full set takes about 45 minutes on four CPU cores.
+(see `LOOK` in the script; `"material": "glass"` renders it in glass). The full set takes about 35 minutes on
+four CPU cores.
 
 ## What is in the box
 
@@ -112,7 +115,7 @@ frame a full step on to verify the symmetry, and `--look '{"absorb": 2}'` overri
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Glass DNA helix and light studio (Home): Blender rotation frames, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py` |
+| Mercury DNA helix and light studio (Home): Blender rotation frames, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |

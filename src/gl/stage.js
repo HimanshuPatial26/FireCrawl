@@ -905,7 +905,7 @@ export class Stage {
       if (this.mobile) hx.group.position.set(visW * 0.13 + p.sx * visW * 0.01, visH * 0.325, 0);
       else hx.group.position.set(visW * 0.27 + p.sx * visW * 0.008, -(1 - k) * visH * 0.05 - p.sy * visH * 0.006, 0);
       hx.group.rotation.set(0, 0, tilt);
-      hx.update(dt, this.time, p, cam.aspect, k, tilt);
+      hx.update(dt, this.time, p, cam.aspect, k);
     }
     if (hx && hx.backdrop.visible) {
       const bu = hx.backdrop.material.uniforms;
