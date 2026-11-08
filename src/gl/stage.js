@@ -8,6 +8,7 @@ import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { Fluid } from './fluid.js';
 import * as S from './shaders.js';
 import { PORTRAIT } from './portrait-data.js';
+import { FlipWall } from './flipwall.js';
 
 // Louver wall size in world units (16:9)
 const W = 9.6;
@@ -20,7 +21,8 @@ const easeIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 // Scene states. Every value is tweened, so any state can blend into any other.
 const MODES = {
   // home: wall to the right, centre closed and edges partly open so the backlight leaks through
-  home: { home: 1, hero: 0, about: 0, dim: 0.08, open: 0.62, arc: 0.9, gap: 0.24, mouseAmt: 0.8, glow: 1.15, orb: 0 },
+  // home: the louver wall closes away and the kinetic flip-panel wall takes its place
+  home: { home: 1, hero: 0, about: 0, dim: 0.08, open: 0, arc: 0.9, gap: 0.24, mouseAmt: 0, glow: 0.95, orb: 0 },
   work: { home: 0, hero: 0, about: 0, dim: 0, open: 1, arc: 1, gap: 0.24, mouseAmt: 1, glow: 1, orb: 0 },
   project: { home: 0, hero: 1, about: 0, dim: 0.78, open: 1, arc: 0, gap: 0.035, mouseAmt: 0, glow: 0.5, orb: 0 },
   about: { home: 0, hero: 0, about: 1, dim: 0.45, open: 0, arc: 0.55, gap: 0.3, mouseAmt: 0, glow: 0.45, orb: 1 },
@@ -89,6 +91,8 @@ export class Stage {
     this.initFloor();
     this.initDust();
     this.initOrb();
+    this.wall = new FlipWall({ mobile, reduced, colors: this.colors });
+    this.scene.add(this.wall.group);
     this.initPost();
     this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
 
@@ -730,14 +734,17 @@ export class Stage {
     );
     this.overlay.add(warm);
     this.orb.visible = true;
+    this.wall.group.visible = true;
     const r = this.renderer;
     const compile = (scene, cam) => (r.compileAsync ? r.compileAsync(scene, cam) : Promise.resolve(r.compile(scene, cam)));
     return Promise.all([compile(this.scene, this.camera), compile(this.overlay, this.ortho)])
       .catch(() => {})
       .then(() => {
-        this.state.orb = 0.0011; // render the orb and media program once while the screen is still black
+        this.state.orb = 0.0011; // render the orb, wall and media programs once while the screen is still black
+        this.state.home = 0.02;
         this.update(1 / 60);
         this.state.orb = 0;
+        this.state.home = 0;
         this.overlay.remove(warm);
         warm.geometry.dispose();
         warm.material.dispose();
@@ -824,7 +831,7 @@ export class Stage {
     u.uOpen.value = st.open;
     u.uArc.value = st.arc;
     u.uGap.value = st.gap;
-    u.uDim.value = st.dim * (1 - st.hero);
+    u.uDim.value = Math.max(st.dim * (1 - st.hero), st.home);
     u.uMouseX.value = ((p.sx * visW) / 2 - g.position.x) / g.scale.x;
     u.uMouseAmt.value = st.mouseAmt * (p.has ? 1 : 0) * (this.reduced ? 0 : 1);
     u.uRipple.value = this.ripple;
@@ -842,8 +849,10 @@ export class Stage {
 
     // skip work nobody can see: an off-screen hero, and reflections under a black floor
     const heroHidden = st.hero > 0.999 && !tr.active && !!this.heroRect && this.heroRect.t + this.heroRect.h < -24;
-    this.slats.visible = !heroHidden;
-    const floorDim = Math.max(st.dim, st.hero * 0.92, st.about * 0.7);
+    const slatsGone = st.home > 0.985;
+    this.slats.visible = !heroHidden && !slatsGone;
+    // on phones the floor sits behind the hero text, so its reflection stays faint there
+    const floorDim = Math.max(st.dim, st.hero * 0.92, st.about * 0.7, this.mobile ? st.home * 0.75 : 0);
     const fu = this.floor.material.uniforms;
     fu.uTime.value = this.time;
     fu.uDim.value = floorDim;
@@ -866,6 +875,19 @@ export class Stage {
     this.orb.rotation.y = p.sx * 0.28;
     this.orb.rotation.x = -p.sy * 0.12;
 
+    // kinetic flip wall (Home hero): right of the text on desktop, above it on phones
+    const wall = this.wall;
+    wall.group.visible = st.home > 0.01;
+    if (wall.group.visible) {
+      const ww = this.mobile ? visW * 0.94 : visW * 0.46;
+      wall.group.scale.setScalar(ww / wall.width);
+      const back = (1 - st.home) * 3;
+      if (this.mobile) wall.group.position.set(0, visH * 0.22, -0.4 - back);
+      else wall.group.position.set(visW * 0.245, visH * 0.05, -0.4 - back);
+      wall.group.rotation.set(-p.sy * 0.06, (this.mobile ? 0 : -0.2) + p.sx * 0.1, 0);
+      wall.update(dt, this.time, cam, p, st.home, st.dim);
+    } else wall.hit = false;
+
     // fluid: simulate while the pointer moves, then rest once the field has settled
     if (st.fluid > 0.01 && !this.reduced) {
       if (this.fluid.splats.length) this.fluidIdle = 0;
@@ -881,7 +903,7 @@ export class Stage {
 
     // artwork animates slowly: refresh at half rate, alternating A and B during transitions,
     // and every frame only while the wall is changing shape
-    if (!heroHidden) {
+    if (!heroHidden && !slatsGone) {
       const reshaped = Math.abs(artAspect - this.lastArtAspect) > 0.002;
       const even = this.frame % 2 === 0;
       if (reshaped || even) this.renderArt(this.slotA, this.rtA, artAspect);

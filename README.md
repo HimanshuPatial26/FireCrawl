@@ -3,6 +3,8 @@
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
+  The hero is a kinetic flip-panel wall that spells out the initials and each headline result; hovering a result
+  shows it on the wall, the cursor ripples the flaps, and clicking the wall opens that case study.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
 - **About** (`#about`): profile, how I work, experience (including Customer Delight), education, skills and contact.
@@ -83,6 +85,7 @@ This rewrites `src/gl/portrait-data.js`.
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
+| Kinetic flip-panel wall (Home hero) | `src/gl/flipwall.js`; the sequence comes from `site.proof` in `src/content.js` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |

@@ -217,7 +217,9 @@ function setupCursor() {
     cy += (y - cy) * k;
     c.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
     const onWork = app.route?.name === 'work' && !c.classList.contains('is-link');
-    const text = drag.dir ? 'Release' : onWork ? 'Drag' : '';
+    const onWall = app.route?.name === 'home' && stage?.wall.hit && !c.classList.contains('is-link');
+    const text = drag.dir ? 'Release' : onWork ? 'Drag' : onWall ? 'Open' : '';
+    c.classList.toggle('is-wall', !!onWall);
     if (label.textContent !== text) label.textContent = text;
     c.classList.toggle('has-label', !!text);
     c.classList.toggle('is-drag', !!drag.on);
@@ -399,6 +401,7 @@ async function leave(prev, next) {
   app.cleanup = [];
   if (!prev) return;
   const el = view.firstElementChild;
+  if (prev.name === 'home') stage?.wall.show('', { duration: 0.9 });
   if (prev.name === 'work') await workOut();
   else if (el) {
     const toNextProject = prev.name === 'project' && next.name === 'project';
@@ -456,10 +459,34 @@ async function enterHome(prev) {
   unlockScroll();
   document.title = `${site.name} · ${site.role}`;
   live.textContent = `${site.name}, ${site.role}. ${site.availability}.`;
+
+  // the flip wall cycles: initials, then each headline result in its pillar's colour
+  const initials = site.name.split(/\s+/).map((w) => w[0]).join('').toUpperCase();
+  const seq = [{ text: initials, slug: null }, ...site.proof.map((p) => ({ text: p.value, slug: p.slug }))];
+  let k = -1;
+  let paused = false;
+  let lastShow = 0;
+  const show = (n) => {
+    if (n === k) return;
+    k = n;
+    const it = seq[k];
+    const idx = it.slug ? projects.findIndex((p) => p.slug === it.slug) : -1;
+    markProof(idx);
+    app.homeTarget = it.slug;
+    if (idx >= 0) {
+      setIndex(idx);
+      root.style.setProperty('--accent', projects[idx].colors.a);
+      stage?.crossTo(idx, 1.2);
+    }
+    stage?.wall.show(it.text);
+    sound.louvers(1.4, 24, 1);
+    lastShow = performance.now();
+  };
+
   let current = stage && groupOf(stage.current) === 'work' ? stage.current : groupOf(app.index) === 'work' ? app.index : firstOf('work');
   setIndex(current);
   root.style.setProperty('--accent', projects[current].colors.a);
-  markProof(current);
+  markProof(-1);
   if (stage) {
     stage.heroEl = null;
     if (stage.current !== current) {
@@ -467,19 +494,37 @@ async function enterHome(prev) {
       else stage.setProject(current);
     }
     stage.setMode('home', { duration: prev ? 1.8 : 2.8 });
-    // the wall cycles through the Work case studies while the visitor reads
-    if (!reduced) {
-      const timer = setInterval(() => {
-        if (app.route?.name !== 'home' || app.busy || document.hidden) return;
-        current = neighbor(current, 1);
-        setIndex(current);
-        root.style.setProperty('--accent', projects[current].colors.a);
-        markProof(current);
-        stage.flipTo(current, 1);
-      }, 6500);
-      app.cleanup.push(() => clearInterval(timer));
-    }
+    stage.wall.show('', { duration: 0.01 });
+    const first = gsap.delayedCall(D(prev ? 0.9 : 1.4), () => show(0));
+    const timer = setInterval(() => {
+      if (app.route?.name !== 'home' || app.busy || document.hidden || paused || reduced) return;
+      if (performance.now() - lastShow > 5200) show((k + 1) % seq.length);
+    }, 400);
+    // hovering or focusing a result puts its number on the wall
+    const onEnter = (e) => {
+      const li = e.target.closest('.h-proof li');
+      if (!li) return;
+      paused = true;
+      show(seq.findIndex((it) => it.slug === li.dataset.slug));
+    };
+    const onLeave = (e) => {
+      const li = e.target.closest('.h-proof li');
+      if (!li || li.contains(e.relatedTarget)) return;
+      paused = false;
+      lastShow = performance.now();
+    };
+    const list = $('.h-proof');
+    list.addEventListener('pointerover', onEnter);
+    list.addEventListener('focusin', onEnter);
+    list.addEventListener('pointerout', onLeave);
+    list.addEventListener('focusout', onLeave);
+    app.cleanup.push(() => {
+      first.kill();
+      clearInterval(timer);
+      app.homeTarget = null;
+    });
   }
+
   const name = splitChars($('.h-name'));
   const intro = splitWords($('.h-intro'));
   const tl = gsap.timeline({ delay: D(prev ? 0.5 : 0.9) });
@@ -1032,6 +1077,10 @@ function setupInput() {
     app.flipping = false;
   };
   addEventListener('pointerup', end);
+  addEventListener('click', (e) => {
+    if (app.route?.name !== 'home' || !stage?.wall.hit || e.target.closest('a, button')) return;
+    location.hash = app.homeTarget || 'work';
+  });
   addEventListener('pointercancel', end);
 
   addEventListener('keydown', (e) => {

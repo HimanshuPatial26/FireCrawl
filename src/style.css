@@ -640,6 +640,7 @@ figcaption span { color: var(--fg); }
 .cursor-dot { position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--fg); }
 .cursor.is-link .cursor-ring { transform: scale(1.6); border-color: var(--accent); }
 .cursor.is-drag .cursor-ring { transform: scale(2.3); border-color: var(--accent); }
+.cursor.is-wall .cursor-ring { transform: scale(1.9); border-color: var(--accent); }
 .cursor-label { position: absolute; left: 24px; top: -7px; white-space: nowrap; color: var(--fg); opacity: 0; transition: opacity 0.3s; }
 .cursor.has-label .cursor-label { opacity: 1; }
 
