@@ -90,6 +90,11 @@ export class Stage {
     this.initDust();
     this.initOrb();
     this.helix = null; // loaded in prepare() so its renders stay out of the first script download
+    // Home helix placement (desktop / phone): size at its centre (fraction of the view height), lean on screen,
+    // tilt towards the camera, centre position (fractions of the view), lens blur strength
+    this.helixPose = mobile
+      ? { size: 0.2, lean: -0.95, tilt: 0.7, x: 0.16, y: 0.335, blur: 0.04, focus: -0.2 }
+      : { size: 0.42, lean: -0.48, tilt: 0.7, x: 0.27, y: 0, blur: 0.045, focus: -0.2 };
     this.initPost();
     this.fluid = new Fluid(r, { res: mobile ? 96 : 128, aspect: innerWidth / innerHeight });
 
@@ -890,7 +895,8 @@ export class Stage {
     this.orb.rotation.y = p.sx * 0.28;
     this.orb.rotation.x = -p.sy * 0.12;
 
-    // glass helix (Home hero) in its light studio, on the right of the text (top right on phones)
+    // mercury helix (Home hero) in its light studio: on the right of the text (top band on phones), running
+    // diagonally and leaning towards the camera, so the far end recedes and the near end comes out at the viewer
     const hx = this.helix;
     if (hx) {
       hx.group.visible = st.home > 0.01;
@@ -898,13 +904,15 @@ export class Stage {
     }
     if (hx && hx.group.visible) {
       const k = st.home;
-      // outer diameter on screen, and enough length to run past the screen edges at its lean
-      const diameter = (this.mobile ? visH * 0.2 : visH * 0.43) * (0.94 + 0.06 * k);
-      hx.layout(diameter, this.mobile ? Math.hypot(visW, visH) * 1.4 : visH * 1.6);
-      const tilt = this.mobile ? -1.04 + p.sx * 0.02 : -0.09 + p.sx * 0.015;
-      if (this.mobile) hx.group.position.set(visW * 0.13 + p.sx * visW * 0.01, visH * 0.325, 0);
-      else hx.group.position.set(visW * 0.27 + p.sx * visW * 0.008, -(1 - k) * visH * 0.05 - p.sy * visH * 0.006, 0);
-      hx.group.rotation.set(0, 0, tilt);
+      const pose = this.helixPose;
+      const diameter = visH * pose.size * (0.94 + 0.06 * k);
+      const length = (this.mobile ? Math.hypot(visW, visH) : visH) * 3;
+      hx.group.position.set(visW * pose.x + p.sx * visW * 0.008, visH * pose.y - (1 - k) * visH * 0.05, 0);
+      // the pointer turns it a little in depth, for parallax
+      hx.group.rotation.set(-p.sy * 0.04, p.sx * 0.07, pose.lean + p.sx * 0.02);
+      hx.uniforms.uBlur.value = pose.blur;
+      // focus near the centre (pose.focus moves it along the depth, in helix diameters; + is further away)
+      hx.layout(diameter, length, pose.tilt, cam.position.z - hx.group.position.z + diameter * pose.focus);
       hx.update(dt, this.time, p, cam.aspect, k);
     }
     if (hx && hx.backdrop.visible) {

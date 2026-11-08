@@ -39,10 +39,12 @@ vec3 lvToScene(vec3 lin){
 `;
 
 const VERT = /* glsl */ `
-varying vec2 vUv; varying vec2 vNdc;
+varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 void main(){
   vUv = uv;
-  vec4 c = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vViewZ = -mv.z;
+  vec4 c = projectionMatrix * mv;
   vNdc = c.xy / c.w;
   gl_Position = c;
 }`;
@@ -51,14 +53,16 @@ const HELIX_FRAG = /* glsl */ `
 uniform sampler2D uA; uniform sampler2D uB; uniform float uMix; uniform float uShiftA; uniform float uShiftB;
 uniform float uRepeat; uniform float uOpacity; uniform float uBg;
 uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
-varying vec2 vUv; varying vec2 vNdc;
+uniform float uFocus; uniform float uBlur; uniform float uWidth;
+varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 ${SHARED}
-// one frame pair at a point: frame A at its own vertical shift, frame B at its own, cross-faded
-float lvAt(vec2 p){
-  return mix(texture2D(uA, vec2(p.x, p.y - uShiftA)).r, texture2D(uB, vec2(p.x, p.y - uShiftB)).r, uMix);
+// one frame pair at a point and mip level: frame A at its own vertical shift, frame B at its own, cross-faded
+float lvAt(vec2 p, float lod){
+  return mix(textureLod(uA, vec2(p.x, p.y - uShiftA), lod).r, textureLod(uB, vec2(p.x, p.y - uShiftB), lod).r, uMix);
 }
+float lvNoise(vec2 px){ return fract(52.9829189 * fract(dot(px, vec2(0.06711056, 0.00583715)))); }
 void main(){
-  // x across the helix, y down from the top of a turn (texture row 0 is the top of the render)
+  // x across the helix, y down from the top of a frame (texture row 0 is the top of the render)
   vec2 p = vec2(vUv.x, (1.0 - vUv.y) * uRepeat);
   // the metal keeps moving a little, like poured liquid that has not quite set
   p.x += (sin(p.y * 37.0 + uTime * 1.1) * 0.0009 + sin(p.y * 15.0 - uTime * 0.7) * 0.0007) * uFlow;
@@ -67,16 +71,40 @@ void main(){
   float d = length(d2);
   float w = sin(d * 38.0 - uTime * 7.5) * exp(-d * 7.0) * uRipple;
   p += normalize(d2 + 1e-5) * w * vec2(0.03, -0.012);
-  // lens colour fringes, as in a photograph: red and blue land a touch apart, more towards the outside
-  float ca = (vUv.x - 0.5) * 0.007;
-  float g = lvAt(p);
-  vec3 c = vec3(lvAt(p + vec2(ca, 0.0)), g, lvAt(p - vec2(ca, 0.0)));
+
+  // depth of field, as through a real lens: the blur grows with distance from the focus plane, so the end that
+  // comes towards the viewer goes soft and large. Radius in texture units (the frames are square tiles).
+  // behind the focus it softens more gently, so the far end stays readable as it recedes
+  float dz = vViewZ - uFocus;
+  float r = uBlur * (dz > 0.0 ? dz * 0.55 : -dz) / uWidth;
+  vec2 size = vec2(textureSize(uA, 0));
+  vec2 gx = dFdx(p * size), gy = dFdy(p * size);
+  float lod = max(0.5 * log2(max(dot(gx, gx), dot(gy, gy))), log2(max(r * size.x * 0.6, 1.0)));
+
+  // lens colour fringes, as in a photograph: red and blue land a touch apart, more towards the outside and
+  // more where the picture is out of focus
+  float ca = (vUv.x - 0.5) * 0.007 + r * 0.04 * sign(vUv.x - 0.5);
+  float g = lvAt(p, lod);
+  vec3 c = vec3(lvAt(p + vec2(ca, 0.0), lod), g, lvAt(p - vec2(ca, 0.0), lod));
+  float k = smoothstep(0.0006, 0.004, r);
+  if (k > 0.0) {
+    // a rotated ring of taps on the pre-blurred mip level smooths it into a lens blur
+    float a0 = lvNoise(gl_FragCoord.xy) * 6.2831853;
+    float sum = g;
+    for (int i = 0; i < 6; i++) {
+      float a = a0 + float(i) * 1.0471976;
+      sum += lvAt(p + vec2(cos(a), sin(a)) * r, lod);
+    }
+    float b = sum / 7.0;
+    c = mix(c, c - g + b, k);
+    g = mix(g, b, k);
+  }
   // a cool tint in the darks, neutral in the lights
   c *= mix(vec3(0.93, 0.955, 0.99), vec3(1.0), smoothstep(0.15, 0.85, g));
   // key out the flat backdrop: anything close to it shows the page's own backdrop instead
   float a = smoothstep(0.01, 0.05, max(abs(g - uBg), max(abs(c.r - uBg), abs(c.b - uBg)))) * uOpacity;
   if (a < 0.002) discard;
-  gl_FragColor = vec4(lvToScene(lvDecode(c)) * a, a);
+  gl_FragColor = vec4(lvToScene(lvDecode(clamp(c, 0.0, 1.0))) * a, a);
 }`;
 
 // rows of the matrices in FinalShader (it lists them by column), inverted once here
@@ -196,21 +224,32 @@ export class Helix {
       uMouse: { value: new THREE.Vector2(9, 9) },
       uAspect: { value: 1 },
       uFlow: { value: reduced ? 0 : 1 },
+      uFocus: { value: 12 },
+      uBlur: { value: 0.06 },
+      uWidth: { value: 1 },
     };
     this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material(HELIX_FRAG, this.uniforms));
     this.strip.frustumCulled = false;
     this.strip.renderOrder = 11;
+    // group: position and lean on screen; tilt: leans the helix towards the camera, so one end comes out at you
+    this.tilt = new THREE.Group();
+    this.tilt.add(this.strip);
     this.group = new THREE.Group();
-    this.group.add(this.strip);
+    this.group.add(this.tilt);
     this.group.visible = false;
     this.backdrop = buildBackdrop();
   }
 
-  // diameter: outer helix diameter in world units; length: how much of it to show along its axis
-  layout(diameter, length) {
+  // diameter: outer helix diameter in world units at its centre; length: how much of it to show along its axis;
+  // tilt: how far it leans towards the camera (radians, lower end forward); focus: camera distance to the centre
+  layout(diameter, length, tilt, focus) {
     const s = diameter / META.outer;
     this.strip.scale.set(META.tile[0] * s, length, 1);
-    this.uniforms.uRepeat.value = length / (META.tile[1] * s);
+    this.tilt.rotation.x = -tilt;
+    const u = this.uniforms;
+    u.uRepeat.value = length / (META.tile[1] * s);
+    u.uWidth.value = META.tile[0] * s;
+    u.uFocus.value = focus;
   }
 
   dragBy(dxPixels) {

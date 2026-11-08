@@ -4,7 +4,8 @@ Portfolio of Himanshu Patial, product manager for payments, growth and AI, based
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
   Home is set in a light studio: a liquid-mercury DNA helix, modelled and path traced in Blender, turns on the
-  right. The surface keeps flowing, the cursor sends ripples across it, and dragging
+  right. It leans out of the screen: placed in the page's 3D scene and tilted towards the camera, its far end
+  recedes while the near end grows and goes soft under a depth-of-field blur. The surface keeps flowing, the cursor sends ripples across it, and dragging
   spins it. Leaving Home fades the studio into the dark pages.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
