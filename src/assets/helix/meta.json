@@ -1,12 +1,12 @@
 {
   "frames": 36,
-  "stepDegrees": 20.0,
-  "rungsPerTurn": 18,
+  "stepDegrees": 25.714286,
+  "rungsPerTurn": 14,
   "tile": [
     2.902267,
     2.9
   ],
-  "shiftPerStep": 0.1111111111111111,
+  "shiftPerStep": 0.14285714285714285,
   "outer": 2.46,
   "pixels": [
     1280,
