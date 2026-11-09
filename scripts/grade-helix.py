@@ -6,6 +6,7 @@ Histogram matching: the helix pixels in the reference (inside --box, minus any -
 rendered frames are ranked by brightness, and each grey level of the frames is mapped to the brightness the
 reference has at the same rank, so the darkest tenth of ours becomes the darkest tenth of theirs, and so on.
 Each level then takes the reference's average colour at that brightness, which carries over its tint.
+The tone curve's slope is limited (--max-slope, --min-slope) so it stays smooth.
 The result is a 256-entry colour table, src/assets/helix/grade.json, that src/gl/helix.js applies as a
 grade. The reference itself is only read, never stored.
 
@@ -27,6 +28,8 @@ ap.add_argument("--exclude", type=int, nargs=4, action="append", default=[], met
 ap.add_argument("--threshold", type=float, default=0.85, help="pixels darker than this belong to the helix")
 ap.add_argument("--grow", type=int, default=3, help="also count bright pixels this close to the helix")
 ap.add_argument("--strength", type=float, default=1.0, help="0 keeps the render, 1 matches the reference")
+ap.add_argument("--max-slope", type=float, default=2.2, help="steepest the tone curve may get (1 = unchanged)")
+ap.add_argument("--min-slope", type=float, default=0.35, help="flattest the tone curve may get")
 args = ap.parse_args()
 
 
@@ -73,6 +76,12 @@ mid_rank = cdf - levels / levels.sum() / 2  # each level sits in the middle of i
 q = np.linspace(0, 1, 2001)
 ref_q = np.quantile(ref_lum, q)
 target = np.interp(mid_rank, q, ref_q)
+# A large flat area in the render (one grey level) would otherwise make the curve jump there, which bands and
+# amplifies compression noise. Limit the slope, then stretch the result back over the matched range.
+lo, hi = target[0], target[-1]
+slope = np.clip(np.diff(target) * 255, args.min_slope, args.max_slope)
+target = np.concatenate([[0.0], np.cumsum(slope) / 255])
+target = lo + (target - target[0]) * (hi - lo) / max(target[-1] - target[0], 1e-6)
 
 bins = 48
 edges = np.linspace(0, 1, bins + 1)

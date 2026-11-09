@@ -61,10 +61,12 @@ LOOK = {
     # studio (direction -> radiance) for the mercury, set up like a high-key chrome product shot: a dark room in
     # front of the helix (behind the camera) and a bright white cyc behind it, a big overhead softbox, dark floor.
     # Faces turned towards the camera mirror the dark room, so they go black; edges and tops catch the bright
-    # studio, so they get white rims. That is the black-band, silver-rim look of the reference. The fill and
-    # window behind the camera ("front", "softbox") and the tall strips are available but off.
-    "room": 0.03, "walls": 0.05, "cyc": 1.5, "top": 4.0, "front": 0.0, "strips": 0.0, "floor": 0.03,
+    # studio, so they get white rims. That is the black-band, silver-rim look of the reference. A faint fill
+    # behind the camera ("front") lifts the darks a little; the window ("softbox") and tall strips are off.
+    "room": 0.05, "walls": 0.05, "cyc": 1.5, "top": 4.0, "front": 0.12, "strips": 0.0, "floor": 0.03,
     "softbox": 0.0,
+    # soft light and dark bands across the dark room: a mirror turns them into the flowing streaks of liquid metal
+    "bands": 0.9,
     "tint": [0.98, 0.99, 1.0],
     # glass
     # the helix: liquid mercury (a near-perfect, neutral mirror) or clear glass
@@ -263,6 +265,8 @@ def studio_image(o, W=2048, H=1024):
     band = S(-0.25, -0.45, dy) * S(0.75, 0.55, np.abs(dz))
     c = c + o["strips"] * (S(0.1, 0.05, np.abs(dx - 0.36)) + 0.7 * S(0.06, 0.025, np.abs(dx + 0.46))) * band
     c = c + o["softbox"] * S(0.32, 0.16, np.abs(dx + 0.42)) * S(0.42, 0.22, np.abs(dz - 0.18)) * S(-0.3, -0.6, dy)
+    pattern = 0.55 * np.sin(LON * 7.0 + 0.4) + 0.3 * np.sin(LAT * 9.0 + LON * 2.0) + 0.15 * np.sin(LON * 17.0 - LAT * 4.0)
+    c = c * (1 + o.get("bands", 0.0) * pattern * S(0.1, 0.5, -dy))
     c = c + (o["floor"] - c) * S(-0.06, -0.32, dz)
     t = LOOK["tint"]
     img = np.stack([c * t[0], c * t[1], c * t[2], np.ones_like(c)], -1).astype(np.float32)
