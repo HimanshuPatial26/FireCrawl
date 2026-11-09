@@ -90,7 +90,7 @@ pip install bpy==5.2.3 numpy
 ```
 
 ```bash
-python scripts/make-helix.py --organic --pitch 7.2 --voxel 0.016 --sway helix-frames --count 48 --sway-range 50 --sway-width 960 --fstop 1.6 --depth-tilt 18 --sway-dist 7.4 --strand-scale 1.25 --rungs-per-turn 17 --rung-height 0.28 --samples 128 --look '{"material":"hybrid","metal_mix":0.72,"absorb":3.0,"cyc":1.0}'
+python scripts/make-helix.py --organic --symmetric --pitch 7.2 --voxel 0.016 --spin helix-frames --count 90 --sway-width 960 --fstop 1.6 --depth-tilt 18 --sway-dist 7.4 --strand-scale 1.25 --rungs-per-turn 17 --rung-height 0.28 --samples 72 --look '{"material":"hybrid","metal_mix":0.72,"absorb":3.0,"cyc":1.0}'
 ```
 
 ```bash
@@ -107,13 +107,23 @@ python3 scripts/grade-helix.py reference.jpg helix-frames --box 200 0 565 920 --
 
 What the render is: a one-off molten sculpture (`--organic`: every rung and swell different, fine liquid ripples)
 in liquid glass with a chrome skin (`"material": "hybrid"`), lit like a high-key product shot (a dark room in
-front, a bright cyc behind, an overhead softbox), shot close-up with perspective and shallow focus. `--sway`
-renders 48 frames across a 50° turn; the page plays them back and forth, dragging turns it further and it eases
-back. Between rendered frames the page draws true in-between images: `flow-helix.py` measures how every pixel
-moves from one frame to the next (optical flow; needs `pip install opencv-python-headless`) and saves small motion
-maps (`flow-NN.webp`, 235 KB in all), and the shader slides both frames towards the in-between position before
-blending them, so the motion runs at the display's frame rate rather than stepping or ghosting. About 80 seconds a frame on four CPU cores, so just over an hour for the set.
-Phones get half-size frames.
+front, a bright cyc behind, an overhead softbox), shot close-up with perspective, the top leaning away and shallow
+focus.
+
+How it turns continuously: `--symmetric` makes the two strands copies and every rung symmetric end to end, so the
+shape repeats every half turn about its axis (each rung is still different from the next along the height).
+`--spin` renders 90 frames across that half turn, 2° apart, and the page loops them for an endless rotation; drag
+spins it with momentum. `--check` renders the frame at 180° as well, which should match frame 0. About 55 seconds a
+frame on four CPU cores, so about 80 minutes for the set (`--start N` resumes). Phones get half-size frames.
+
+Between rendered frames the page draws true in-between images: `flow-helix.py` measures how every pixel moves from
+one frame to the next, including the last back to the first (optical flow; needs
+`pip install opencv-python-headless`), and saves small motion maps (`flow-NN.webp`); the shader slides both frames
+towards the in-between position before blending them, so the motion runs at the display's frame rate rather than
+stepping or ghosting. At 2° spacing this stays close to a true in-between render (error 4.2, against 12.2 for a
+plain cross-fade); at 4° it degrades (8.2), which is why the frames are 2° apart.
+
+`--sway` instead renders frames across a limited turn (`--sway-range`) that the page plays back and forth.
 
 `grade-helix.py` matches the tone and colour to a reference picture: it ranks the helix pixels of both by
 brightness and maps each grey level of the frames to the brightness and colour the reference has at the same

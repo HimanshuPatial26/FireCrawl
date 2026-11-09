@@ -56,6 +56,12 @@ ap.add_argument("--organic", action="store_true",
                      "rotation tiling does not apply; use --preview or --turn)")
 ap.add_argument("--lean", type=float, default=0.0, help="--preview: tilt the helix in the picture plane (degrees)")
 ap.add_argument("--sway", help="directory for sway frames: a close-up turning back and forth (use with --organic)")
+ap.add_argument("--spin", help="directory for spin frames: the same close-up turning continuously (use with "
+                               "--organic --symmetric); frames cover 180 degrees, which repeats")
+ap.add_argument("--start", type=int, default=0, help="--spin: resume from this frame")
+ap.add_argument("--symmetric", action="store_true",
+                help="organic mode: make the two strands copies and every rung and swell symmetric under a half "
+                     "turn, so the shape repeats every 180 degrees about its axis (needed for --spin)")
 ap.add_argument("--sway-range", type=float, default=50.0, help="total turn covered by the sway frames (degrees)")
 ap.add_argument("--sway-width", type=int, default=960, help="sway frame width in pixels (frames are 2:3)")
 ap.add_argument("--depth-tilt", type=float, default=14.0, help="sway: top of the helix leans away (degrees)")
@@ -154,7 +160,8 @@ def free_noise(th, scale, seed):
     return noise.noise(Vector((th * scale * 0.5, seed, 0.37)))
 
 
-for phase, seed in ((0.0, 1.7), (math.pi, 9.3 if args.organic else 1.7)):  # symmetric mode: strands are copies
+# the two strands are copies (same noise) unless the organic model is free to differ
+for phase, seed in ((0.0, 1.7), (math.pi, 9.3 if args.organic and not args.symmetric else 1.7)):
     rings = []
     samples = int((TH1 - TH0) / (2 * math.pi) * 216)
     for i in range(samples + 1):
@@ -187,7 +194,7 @@ for r in range(math.floor(TH0 / STEP), math.ceil(TH1 / STEP)):
     if args.organic:  # every rung its own: thickness, depth, sag, drift and a lopsided swell
         pr = dict(rh=RUNG["rh"] * rr_.uniform(0.8, 1.15), rd=RUNG["rd"] * rr_.uniform(0.85, 1.12),
                   sag=rr_.uniform(0.0, 0.06), drift=rr_.uniform(-0.04, 0.04), ph=rr_.uniform(0, 6.28),
-                  lop=rr_.uniform(-0.12, 0.12), dz=rr_.uniform(-0.03, 0.03))
+                  lop=rr_.uniform(-0.12, 0.12), dz=rr_.uniform(-0.03, 0.03), k=rr_.uniform(1.3, 2.3))
     a, b = helix(th, 0.0), helix(th, math.pi)
     d = b - a
     length = d.length
@@ -201,10 +208,18 @@ for r in range(math.floor(TH0 / STEP), math.ceil(TH1 / STEP)):
         c = a + d * (u * length)
         if args.organic:
             c.z -= pr["sag"] * math.sin(math.pi * u) - pr["dz"]
-            c += side * pr["drift"] * math.sin(2 * math.pi * u * 1.3 + pr["ph"])
             flare = 1 + 0.75 * (1 - ss(0.04, 0.24, min(u, 1 - u)))
-            wob = 1 + 0.1 * math.sin(2 * math.pi * u * 1.7 + pr["ph"]) + pr["lop"] * (u - 0.5) * 2
-            hh, dd = pr["rh"] * flare * wob, pr["rd"] * flare * (1 + 0.05 * math.sin(5 * u + pr["ph"]))
+            if args.symmetric:
+                # a half turn maps each rung onto itself end to end (u -> 1 - u, sideways -> opposite), so every
+                # term is symmetric about the middle, and the sideways drift antisymmetric
+                v = u - 0.5
+                c += side * pr["drift"] * math.sin(2 * math.pi * 1.3 * v)
+                wob = 1 + 0.1 * math.cos(2 * math.pi * pr["k"] * v)
+                hh, dd = pr["rh"] * flare * wob, pr["rd"] * flare * (1 + 0.05 * math.cos(5 * v))
+            else:
+                c += side * pr["drift"] * math.sin(2 * math.pi * u * 1.3 + pr["ph"])
+                wob = 1 + 0.1 * math.sin(2 * math.pi * u * 1.7 + pr["ph"]) + pr["lop"] * (u - 0.5) * 2
+                hh, dd = pr["rh"] * flare * wob, pr["rd"] * flare * (1 + 0.05 * math.sin(5 * u + pr["ph"]))
             ring = []
             for j in range(24):
                 x, y = superellipse(2 * math.pi * j / 24, args.rung_shape)
@@ -268,7 +283,12 @@ nr = nr.reshape(-1, 3)
 disp = np.empty(len(co))
 for i, (x, y, z) in enumerate(co):
     if args.organic:  # molten swell plus fine liquid ripples (contour-like rings from a sine of noise)
-        pv = Vector((x, y, z))
+        if args.symmetric:
+            # (x, y) through the complex square, (x^2 - y^2, 2xy) / 2: identical for a point and its half-turn
+            # copy, smooth everywhere, and at the strands' radius it keeps the original feature size
+            pv = Vector(((x * x - y * y) * 0.5, x * y, z))
+        else:
+            pv = Vector((x, y, z))
         swell = noise.noise(pv * 0.9 + Vector((3.1, 0, 0)))
         ripple = math.sin(noise.noise(pv * 1.4 + Vector((0, 8.7, 0))) * 14.0)
         disp[i] = 0.026 * swell + 0.0035 * ripple
@@ -459,7 +479,9 @@ if args.sway:
     scene.render.resolution_x = args.sway_width
     scene.render.resolution_y = round(args.sway_width * 1.5)
     frame_h = 2 * dist * (cam.data.sensor_height / 2) / lens  # height of the frame at the helix axis
-    obj.rotation_mode = "XYZ"
+    # spin about the helix's own axis first, then lean and tilt it (Blender applies ZYX as Z first): with the other
+    # order the turn would happen about the tilted axis and the helix would wobble
+    obj.rotation_mode = "ZYX"
     n = max(1, args.count)
     for i in range(n):
         turn = 0.0 if n == 1 else math.radians(args.sway_range) * (i / (n - 1) - 0.5)
@@ -471,6 +493,46 @@ if args.sway:
         "frames": n,
         "rangeDegrees": args.sway_range,
         "tile": [round(frame_h / 1.5, 6), round(frame_h, 6)],  # frame size in world units at the helix axis
+        "outer": round(OUTER, 6),
+        "pixels": [scene.render.resolution_x, scene.render.resolution_y],
+        "background": BG,
+    }
+    (out / "helix-meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    print("meta", meta)
+
+if args.spin:
+    # The same close-up as --sway, turning continuously. With --symmetric the shape repeats every half turn, so
+    # frames cover 0..180 degrees (frame i at 180 i / count) and the page loops them. --check also renders the
+    # frame at 180 degrees, which should match frame 0.
+    assert args.symmetric, "--spin needs --symmetric (the frames cover half a turn)"
+    out = Path(args.spin)
+    out.mkdir(parents=True, exist_ok=True)
+    lens, dist = 35.0, args.sway_dist
+    cam.data.type = "PERSP"
+    cam.data.lens = lens
+    cam.data.sensor_fit = "VERTICAL"
+    cam.data.sensor_height = 24.0
+    cam.location = (0, -dist, 0)
+    cam.rotation_euler = (math.radians(90), 0, 0)
+    if args.fstop > 0:
+        cam.data.dof.use_dof = True
+        cam.data.dof.focus_distance = dist - R * 0.6  # the front of the helix
+        cam.data.dof.aperture_fstop = args.fstop
+    scene.render.resolution_x = args.sway_width
+    scene.render.resolution_y = round(args.sway_width * 1.5)
+    frame_h = 2 * dist * (cam.data.sensor_height / 2) / lens
+    obj.rotation_mode = "ZYX"
+    n = max(1, args.count)
+    start = args.start or 0
+    for i in range(start, n + (1 if args.check else 0)):
+        obj.rotation_euler = (math.radians(-args.depth_tilt), math.radians(args.lean), math.pi * i / n)
+        render(str(out / f"frame-{i:02d}.png"))
+        print("rendered", out / f"frame-{i:02d}.png", flush=True)
+    meta = {
+        "mode": "spin",
+        "frames": n,
+        "periodDegrees": 180,
+        "tile": [round(frame_h / 1.5, 6), round(frame_h, 6)],
         "outer": round(OUTER, 6),
         "pixels": [scene.render.resolution_x, scene.render.resolution_y],
         "background": BG,

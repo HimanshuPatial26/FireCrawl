@@ -5,9 +5,13 @@ import GRADE from '../assets/helix/grade.json';
 // Liquid glass-chrome DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded
 // live: glass and mirror reflecting and refracting a studio and itself only look right path traced.
 //
-// Two kinds of frame sets, told apart by META.mode:
+// Three kinds of frame sets, told apart by META.mode:
 //
-// "sway" (the default render): a one-off molten sculpture shot close-up with perspective and shallow focus,
+// "spin" (the default render): the close-up below, turning continuously. The model repeats every half turn
+// (its two strands are copies and every rung is symmetric end to end), so META.frames frames cover 180 degrees
+// and loop; drag spins it with momentum.
+//
+// "sway": a one-off molten sculpture shot close-up with perspective and shallow focus,
 // rendered at META.frames angles across META.rangeDegrees. It turns slowly back and forth; dragging turns it
 // further, and it eases back. Between two rendered frames the shader draws a true in-between image: a motion map
 // (optical flow, scripts/flow-helix.py) slides both frames towards the in-between position before they are
@@ -155,6 +159,8 @@ const OUT_INV = new THREE.Matrix3().set(1.60475, -0.53108, -0.07367, -0.10208, 1
 const IN_INV = new THREE.Matrix3().set(0.59719, 0.35458, 0.04823, 0.076, 0.90834, 0.01566, 0.0284, 0.13383, 0.83777).invert();
 
 const SWAY = META.mode === 'sway';
+const SPIN = META.mode === 'spin';
+const CLOSEUP = SWAY || SPIN; // one picture with its own perspective and focus blur, shown flat
 
 // the colour grade table as a 256x1 texture
 function gradeTexture() {
@@ -208,7 +214,7 @@ async function loadFrame(renderer, url) {
   canvas.width = canvas.height = 0; // release the canvas memory now
   const t = new THREE.DataTexture(r, w, h, THREE.RedFormat, THREE.UnsignedByteType);
   t.wrapS = THREE.ClampToEdgeWrapping;
-  t.wrapT = SWAY ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+  t.wrapT = CLOSEUP ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.magFilter = THREE.LinearFilter;
   t.generateMipmaps = true;
@@ -272,7 +278,7 @@ export class Helix {
     const first = Math.min(6, order.length);
     // one at a time keeps memory peaks low; the page opens once the coarse set is in
     for (const i of order.slice(0, first)) frames[i] = await loadFrame(renderer, urls[i]);
-    const flowList = SWAY && META.flow ? sorted(flowUrls) : [];
+    const flowList = CLOSEUP && META.flow ? sorted(flowUrls) : [];
     const flows = new Array(flowList.length).fill(null);
     const helix = new Helix(frames, opts, flows);
     (async () => {
@@ -286,10 +292,11 @@ export class Helix {
   constructor(frames, { mobile = false, reduced = false, display = false }, flows = []) {
     this.frames = frames;
     this.flows = flows;
-    this.sway = SWAY;
+    this.closeup = CLOSEUP;
+    this.period = THREE.MathUtils.degToRad(META.periodDegrees || 180); // spin: the turn after which frames repeat
     this.mobile = mobile;
     this.reduced = reduced;
-    this.angle = SWAY ? 0 : 0.35; // radians: where the turn starts (sway: the middle of the range)
+    this.angle = SWAY ? 0 : SPIN ? 0.6 : 0.35; // radians: where the turn starts (sway: the middle of the range)
     this.offset = 0; // sway: how far dragging has turned it from the idle motion
     this.half = THREE.MathUtils.degToRad((META.rangeDegrees || 0) / 2);
     this.spinVel = 0;
@@ -322,7 +329,7 @@ export class Helix {
       uDead: { value: 0 },
       uGrade: { value: gradeTexture() },
       uGradeAmt: { value: 1 },
-      uEdge: { value: SWAY ? 0.12 : 0 },
+      uEdge: { value: CLOSEUP ? 0.12 : 0 },
       uMotion: { value: null },
       uMotionOn: { value: 0 },
       // motion map units -> texture units: (value - 128) / scale pixels of the full-size frame
@@ -348,7 +355,7 @@ export class Helix {
   // tilt: how far it leans towards the camera (radians, lower end forward); focus: camera distance to the centre
   layout(diameter, length, tilt, focus, bend = 0) {
     const s = diameter / META.outer;
-    if (SWAY) {
+    if (CLOSEUP) {
       // one picture with its perspective and focus blur baked in: shown flat, at its own proportions
       this.strip.scale.set(META.tile[0] * s, META.tile[1] * s, 1);
       this.tilt.rotation.x = 0;
@@ -376,6 +383,37 @@ export class Helix {
     if (SWAY) this.offset += v;
     else this.angle += v;
     this.spinVel = this.spinVel * 0.6 + v * 5;
+  }
+
+  // spin: blend the two loaded frames around the current angle, looping every half turn
+  setSpin() {
+    const frames = this.frames;
+    const n = frames.length;
+    let a = (this.angle / this.period) % 1;
+    if (a < 0) a += 1;
+    const f = a * n;
+    let i0 = Math.floor(f) % n;
+    let back = 0;
+    while (!frames[i0] && back < n) { // frame 0 always loads first
+      i0 = (i0 - 1 + n) % n;
+      back++;
+    }
+    let i1 = (i0 + 1) % n;
+    let ahead = 1;
+    while (!frames[i1] && ahead < n) {
+      i1 = (i1 + 1) % n;
+      ahead++;
+    }
+    const pos = f - Math.floor(f) + back; // how far past frame i0 we are, in frame steps
+    const u = this.uniforms;
+    u.uA.value = frames[i0];
+    u.uB.value = frames[i1];
+    u.uMix.value = THREE.MathUtils.clamp(pos / ahead, 0, 1);
+    u.uShiftA.value = u.uShiftB.value = 0;
+    // neighbouring frames with a motion map between them: draw the true in-between image
+    const flow = ahead === 1 ? this.flows[i0] : null;
+    u.uMotion.value = flow;
+    u.uMotionOn.value = flow ? 1 : 0;
   }
 
   // sway: blend the two loaded frames around the current angle
@@ -445,6 +483,14 @@ export class Helix {
     this.ripple += (target - this.ripple) * (1 - Math.exp(-dt * (target > this.ripple ? 6 : 1.3)));
     u.uRipple.value = this.ripple;
 
+    if (SPIN) {
+      // a steady turn (a full turn in about 24 s) plus drag momentum
+      this.spinVel *= Math.exp(-dt * 2.8);
+      this.angle += ((this.reduced ? 0 : 0.26) + this.spinVel) * dt;
+      this.angle %= this.period * 1000; // keep it from growing without bound (whole periods, so nothing jumps)
+      this.setSpin();
+      return;
+    }
     if (SWAY) {
       // slow back-and-forth turn; dragging adds to it with momentum, then it eases back
       this.spinVel *= Math.exp(-dt * 2.8);

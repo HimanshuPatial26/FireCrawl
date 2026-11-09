@@ -9,7 +9,9 @@ B. The page then draws a moment t between them as (1 - t) * A(p - t F) + t * B(p
 towards the in-between position before they are blended, so the helix moves smoothly at the display's frame rate
 instead of cross-fading (which shows two faint copies mid-way and reads as stepping).
 
-Writes src/assets/helix/flow-NN.webp (flow from frame NN to NN+1, quarter resolution: red is x and green is y,
+For spin frames (a loop), it also measures the last frame back to the first.
+
+Writes src/assets/helix/flow-NN.webp (flow from frame NN to NN+1, wrapping for spin frames, quarter resolution: red is x and green is y,
 128 is zero, FLOW_SCALE steps per pixel of the full-size frame) and adds "flow" to meta.json. Rare outliers (at
 the frame corners and faded ends) are clamped and median-filtered away. Against a true in-between frame rendered in
 Blender, this cuts the error of a half-way frame from 7.3 (cross-fade) to 3.05.
@@ -45,8 +47,9 @@ for old in out.glob("flow-*.webp"):
 frames = [np.asarray(Image.open(src / f"frame-{i:02d}.png").convert("L")) for i in range(n)]
 h, w = frames[0].shape
 peak, total = 0.0, 0
-for i in range(n - 1):
-    f = flow(frames[i], frames[i + 1])
+pairs = n if meta.get("mode") == "spin" else n - 1
+for i in range(pairs):
+    f = flow(frames[i], frames[(i + 1) % n])
     small = np.clip(cv2.resize(f, (w // DOWN, h // DOWN), interpolation=cv2.INTER_AREA), -LIMIT, LIMIT)
     small = np.dstack([cv2.medianBlur(np.ascontiguousarray(small[..., k]), 5) for k in range(2)])
     small = cv2.GaussianBlur(small, (3, 3), 0)
@@ -58,4 +61,4 @@ for i in range(n - 1):
     total += path.stat().st_size
 meta["flow"] = {"scale": FLOW_SCALE, "pixels": [w // DOWN, h // DOWN]}
 (out / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
-print(f"{n - 1} flow maps, {total / 1024:.0f} KB, largest motion {peak:.1f} px between neighbouring frames")
+print(f"{pairs} flow maps, {total / 1024:.0f} KB, largest motion {peak:.1f} px between neighbouring frames")
