@@ -354,6 +354,7 @@ figcaption,
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px;
+  margin-block: 4px;
 }
 .h-proof a { display: grid; gap: 6px; text-decoration: none; color: var(--fg); }
 .hp-code { font: 500 clamp(14px, 1.1vw, 17px) / 1 var(--font-display); letter-spacing: -0.01em; transition: text-shadow 0.5s var(--ease); }
@@ -388,6 +389,181 @@ figcaption,
   pointer-events: none;
   opacity: 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Home components adapted from Uiverse.io (MIT), restyled to the poster system                          */
+/* ------------------------------------------------------------------ */
+
+/* dot-grid paper behind the text column, fading out towards the helix: after themrsami, "hot-fly-3" */
+.is-home .home::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 -14% 0 calc(-1 * var(--gutter));
+  background-image: radial-gradient(circle, rgba(10, 10, 11, 0.2) 1px, transparent 1.3px);
+  background-size: 22px 22px;
+  background-position: 11px 11px;
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 50%, transparent 92%), linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, #000 0%, #000 50%, transparent 92%), linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  mask-composite: intersect;
+  pointer-events: none;
+}
+
+/* two-part labels and a small lift: after McHaXYT, "fresh-turkey-35" */
+.btn-sub { opacity: 0.55; transition: opacity 0.4s var(--ease); }
+.btn:hover .btn-sub,
+.btn:focus-visible .btn-sub { opacity: 0.75; }
+.is-home .btn { transition: color 0.45s var(--ease), border-color 0.45s var(--ease), transform 0.25s ease-out; }
+.is-home .btn:hover,
+.is-home .btn:focus-visible { transform: translateY(-3px); }
+
+/* result cards with a folded corner; hover floods them with ink from the bottom-left corner, inverting
+   them: after OnCloud125252, "tough-moth-4" */
+.h-proof a {
+  position: relative;
+  isolation: isolate;
+  margin: -12px;
+  padding: 12px 14px 14px 12px;
+  overflow: hidden;
+}
+.h-proof a::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--fg);
+  clip-path: polygon(0 100%, 0 100%, 0 100%);
+  transition: clip-path 0.45s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.h-proof a::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  background: var(--fg);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  transition: transform 0.3s var(--ease);
+}
+.h-proof a:hover::before,
+.h-proof a:focus-visible::before { clip-path: polygon(0 100%, 0 -120%, 220% 100%); }
+.h-proof a:hover::after,
+.h-proof a:focus-visible::after { transform: translate(6px, -6px); }
+.h-proof a .hp-code,
+.h-proof a .hp-v,
+.h-proof a .hp-l,
+.h-proof a .hp-l b { transition: color 0.3s ease 0.08s, text-shadow 0.5s var(--ease); }
+.h-proof a:hover .hp-code,
+.h-proof a:hover .hp-v,
+.h-proof a:hover .hp-l b,
+.h-proof a:focus-visible .hp-code,
+.h-proof a:focus-visible .hp-v,
+.h-proof a:focus-visible .hp-l b { color: var(--ink); }
+.h-proof a:hover .hp-l,
+.h-proof a:focus-visible .hp-l { color: rgba(236, 236, 236, 0.72); }
+.h-proof a:focus-visible { outline-offset: 0; }
+
+/* email copy button with a tooltip that springs up: after Galahhad, "kind-cheetah-52", and Quezaquo,
+   "bitter-wolverine-27" */
+.h-copy {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: -3px 0 0 -6px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.3s, background-color 0.3s;
+}
+.h-copy:hover,
+.h-copy:focus-visible { color: var(--fg); background: rgba(10, 10, 11, 0.06); }
+.h-copy-text { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.h-copy-icon { position: relative; width: 13px; height: 13px; display: inline-grid; }
+.h-copy-icon svg { grid-area: 1 / 1; transition: opacity 0.2s, transform 0.3s var(--ease); }
+.h-copy .i-check { opacity: 0; transform: scale(0.4); }
+.h-copy.is-copied .i-clip { opacity: 0; transform: scale(0.4); }
+.h-copy.is-copied .i-check { opacity: 1; transform: none; }
+.h-tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  translate: -50% 0;
+  padding: 6px 9px;
+  background: var(--fg);
+  color: var(--ink);
+  font: 500 11px / 1 var(--font-display);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform-origin: center bottom;
+  pointer-events: none;
+}
+.h-tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0;
+  border: 5px solid transparent;
+  border-top-color: var(--fg);
+}
+.h-tip-b,
+.h-tip-c { display: none; }
+.h-copy.is-copied .h-tip-a,
+.h-copy.is-select .h-tip-a { display: none; }
+.h-copy.is-copied .h-tip-b,
+.h-copy.is-select .h-tip-c { display: inline; }
+.h-copy:hover .h-tip,
+.h-copy:focus-visible .h-tip,
+.h-copy.is-copied .h-tip,
+.h-copy.is-select .h-tip { opacity: 1; visibility: visible; animation: h-pop 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55) both; }
+@keyframes h-pop {
+  0% { transform: translateY(6px) scaleY(0); opacity: 0; }
+  50% { transform: translateY(-3px) scaleY(1.15); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+
+/* outline sound switch with a raised thumb, Home only: after Voxybuns, "horrible-shrimp-47" */
+.sound-switch { display: none; }
+.is-home .sound canvas { display: none; }
+.is-home .sound-switch {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 13px;
+  border: 1.5px solid var(--fg);
+  border-radius: 13px;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+.is-home .sound-switch::before {
+  content: "";
+  position: absolute;
+  left: -1.5px;
+  top: -1.5px;
+  width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--fg);
+  border-radius: 50%;
+  background: var(--ink);
+  transform: translateY(-2px);
+  box-shadow: 0 2px 0 var(--fg);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.is-home .sound:hover .sound-switch::before { transform: translateY(-3px); box-shadow: 0 3px 0 var(--fg); }
+.is-home .sound[aria-pressed="true"] .sound-switch { background: var(--slate); }
+.is-home .sound[aria-pressed="true"] .sound-switch::before { transform: translate(13px, -2px); }
+.is-home .sound[aria-pressed="true"]:hover .sound-switch::before { transform: translate(13px, -3px); }
 
 /* ------------------------------------------------------------------ */
 /* Work index                                                          */
@@ -776,6 +952,8 @@ figcaption span { color: var(--fg); }
   .chapter--flip .ch-media { grid-column: 1 / -1; grid-row: auto; }
   .home { width: auto; padding-top: calc(env(safe-area-inset-top, 0px) + 46vh); min-height: 0; }
   .h-overlay { display: none; }
+  /* phones: the dot grid starts below the helix band */
+  .is-home .home::before { top: calc(env(safe-area-inset-top, 0px) + 40vh); }
   .a-exp { grid-template-columns: minmax(0, 1fr); }
   .about { width: auto; padding-top: calc(env(safe-area-inset-top, 0px) + 44vh); }
   .pn-media { width: 70vw; }

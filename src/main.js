@@ -74,7 +74,7 @@ function buildHud() {
       <a href="#about" data-nav="about">About</a>
       <a class="hud-cv" href="${esc(site.resume)}" download>Resume</a>
       <button class="sound" type="button" aria-pressed="false">
-        <canvas width="88" height="32" aria-hidden="true"></canvas><span class="sound-label">Sound off</span>
+        <canvas width="88" height="32" aria-hidden="true"></canvas><span class="sound-switch" aria-hidden="true"></span><span class="sound-label">Sound off</span>
       </button>
     </nav>`;
 }
@@ -450,6 +450,51 @@ function nameLine(word) {
   return `<span class="hn-line"><span class="hn-glitch hn-glitch--${kind}" aria-hidden="true"><span>${first}</span><span>${first}</span><span>${first}</span></span><span class="hn-word">${esc(word)}</span></span>`;
 }
 
+// Copy-to-clipboard button with a tooltip that springs up: adapted from Uiverse.io (MIT) by Galahhad
+// ("kind-cheetah-52", the copy/copied button) and Quezaquo ("bitter-wolverine-27", the pop-up tooltip)
+function copyButton(text) {
+  return `<button class="h-copy" type="button" data-copy="${esc(text)}" aria-label="Copy email address ${esc(text)}"><span class="h-copy-text">${esc(text)}</span><span class="h-copy-icon" aria-hidden="true"><svg class="i-clip" viewBox="0 0 16 16" width="13" height="13"><rect x="5" y="5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 3V2H2v9h1" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><svg class="i-check" viewBox="0 0 16 16" width="13" height="13"><path d="M2.5 8.5l3.5 3.5 7.5-8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><span class="h-tip" aria-hidden="true"><span class="h-tip-a">Copy</span><span class="h-tip-b">Copied</span><span class="h-tip-c">Press ⌘/Ctrl C</span></span></button>`;
+}
+
+function setupCopy(btn) {
+  if (!btn) return;
+  let timer = 0;
+  btn.addEventListener('click', async () => {
+    const text = btn.dataset.copy;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // older browsers and sandboxed frames: copy through a hidden field, else select the address for the visitor
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      Object.assign(field.style, { position: 'fixed', opacity: '0', pointerEvents: 'none' });
+      document.body.appendChild(field);
+      field.select();
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+      field.remove();
+    }
+    if (!ok) {
+      const range = document.createRange();
+      range.selectNodeContents($('.h-copy-text', btn));
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+    }
+    btn.classList.remove('is-copied', 'is-select');
+    void btn.offsetWidth; // restart the pop-up animation
+    btn.classList.add(ok ? 'is-copied' : 'is-select');
+    live.textContent = ok ? 'Email address copied' : `Email address selected: ${text}`;
+    clearTimeout(timer);
+    timer = setTimeout(() => btn.classList.remove('is-copied', 'is-select'), 1800);
+  });
+}
+
 function renderHome() {
   const proof = site.proof
     .map(
@@ -466,12 +511,13 @@ function renderHome() {
       <dl class="h-keys">
         <div><dt>Status:</dt><dd>${esc(site.availability)}</dd></div>
         <div><dt>Base:</dt><dd>${esc(site.location)}</dd></div>
+        <div><dt>Email:</dt><dd>${copyButton(site.email)}</dd></div>
       </dl>
       <p class="h-index">${esc(site.homeIndex)}</p>
       <ul class="h-proof" aria-label="Highlights">${proof}</ul>
       <div class="h-actions">
-        <a class="btn btn--solid" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">View work</span><span class="btn-arrow" aria-hidden="true">→</span></a>
-        <a class="btn" href="${esc(site.resume)}" download><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Download resume</span><span class="btn-arrow" aria-hidden="true">↓</span></a>
+        <a class="btn btn--solid" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">View work<span class="btn-sub"> ─ ${members('work').length} case studies</span></span><span class="btn-arrow" aria-hidden="true">→</span></a>
+        <a class="btn" href="${esc(site.resume)}" download><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">Download resume<span class="btn-sub"> ─ PDF</span></span><span class="btn-arrow" aria-hidden="true">↓</span></a>
         <a class="btn" href="${esc(site.linkedin)}" target="_blank" rel="noopener"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">LinkedIn</span><span class="btn-arrow" aria-hidden="true">↗</span></a>
       </div>
       <p class="h-foot">${esc(site.homeFoot)}</p>
@@ -555,6 +601,8 @@ async function enterHome(prev) {
   app.cleanup.push(() => {
     gsap.to(overlay, { opacity: 0, duration: D(0.4), onComplete: () => overlay.remove() });
   });
+
+  setupCopy($('.h-copy'));
 
   const name = $$('.hn-word').flatMap((el) => splitChars(el));
   $$('.hn-word').forEach((el) => el.removeAttribute('aria-label')); // the h1 already carries the name

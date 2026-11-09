@@ -151,6 +151,23 @@ Home follows the "atomic sleep" poster rather than the rest of the site (scoped 
 - **Overlay:** white heavy uppercase words over the helix that show on its dark metal and vanish on the studio
   (desktop only).
 
+### Components adapted from Uiverse
+
+Five Home components are adapted from [Uiverse.io](https://uiverse.io) (MIT licence), rebuilt in the Home
+design system above (monochrome, Inter Tight, sharp corners, the steel-blue fringe):
+
+| Component | Based on |
+| --- | --- |
+| Email copy button: copies on click, the icon swaps to a check | [Galahhad, kind-cheetah-52](https://uiverse.io/Galahhad/kind-cheetah-52) |
+| Tooltip that springs up over the copy button (Copy / Copied) | [Quezaquo, bitter-wolverine-27](https://uiverse.io/Quezaquo/bitter-wolverine-27) |
+| Two-part button labels ("View work ─ 3 case studies") with a lift on hover | [McHaXYT, fresh-turkey-35](https://uiverse.io/McHaXYT/fresh-turkey-35) |
+| Result cards with a folded corner; ink sweeps in diagonally on hover | [OnCloud125252, tough-moth-4](https://uiverse.io/OnCloud125252/tough-moth-4) |
+| Outline sound switch with a raised thumb (Home HUD) | [Voxybuns, horrible-shrimp-47](https://uiverse.io/Voxybuns/horrible-shrimp-47) |
+| Dot-grid paper behind the text column | [themrsami, hot-fly-3](https://uiverse.io/themrsami/hot-fly-3) |
+
+If the clipboard is blocked (some embedded previews), the copy button selects the address instead and the
+tooltip says to press ⌘/Ctrl C.
+
 ## What is in the box
 
 | Area | Where |
