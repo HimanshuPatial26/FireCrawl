@@ -3,11 +3,10 @@
 Portfolio of Himanshu Patial, product manager for payments, growth and AI, based in Dubai.
 
 - **Home** (`#home`): who, what, availability, three headline results and links to the resume and LinkedIn.
-  Home is set in a light studio: a liquid-mercury DNA helix, modelled and path traced in Blender, turns on the
-  right. It leans out of the screen: placed in the page's 3D scene and tilted towards the camera, its far end
-  recedes and softens under a depth-of-field blur while the body stays sharp. It draws on its own layer above the
-  page and lets clicks through. The surface keeps flowing, the cursor sends ripples across it, and dragging
-  spins it. Leaving Home fades the studio into the dark pages.
+  Home is set in a light studio: a liquid glass-chrome DNA helix, modelled and path traced in Blender, sways on
+  the right, shot close-up like a product photo: perspective, with the top leaning away and softening out of
+  focus. It draws on its own layer above the page and lets clicks through. The surface keeps flowing, the cursor
+  sends ripples across it, and dragging turns it. Leaving Home fades the studio into the dark pages.
 - **Work** (`#work`): three Classplus case studies, one per pillar: Payments, Growth and AI.
 - **Projects** (`#projects`): Master of Global Business projects at SP Jain School of Global Management.
 - **About** (`#about`): profile, how I work, experience (including Customer Delight), education, skills and contact.
@@ -84,42 +83,41 @@ This rewrites `src/gl/portrait-data.js`.
 ### Helix
 
 The Home helix is modelled and rendered in Blender (Cycles), run headless through its Python module
-(needs Python 3.13), then encoded for the site with Pillow:
+(needs Python 3.13), then encoded and colour-graded for the site with Pillow:
 
 ```bash
 pip install bpy==5.2.3 numpy
 ```
 
 ```bash
-python scripts/make-helix.py --frames helix-frames --count 36
+python scripts/make-helix.py --organic --pitch 7.2 --voxel 0.016 --sway helix-frames --count 48 --sway-range 50 --sway-width 960 --fstop 1.6 --depth-tilt 18 --sway-dist 7.4 --strand-scale 1.25 --rungs-per-turn 17 --rung-height 0.28 --samples 128 --look '{"material":"hybrid","metal_mix":0.72,"absorb":3.0,"cyc":1.0}'
 ```
 
 ```bash
 python3 scripts/encode-helix.py helix-frames
 ```
 
-To match the helix's tone and colour to a reference picture, give the helix's area in it (pixels; `--exclude`
-leaves out droplets or labels inside that area):
-
 ```bash
-python3 scripts/grade-helix.py reference.jpg helix-frames --box 200 0 565 920
+python3 scripts/grade-helix.py reference.jpg helix-frames --box 200 0 565 920 --max-slope 2.6
 ```
 
-This ranks the helix pixels of both by brightness and maps each grey level of the frames to the brightness and
-colour the reference has at the same rank (histogram matching). It writes a 256-entry colour table,
-`src/assets/helix/grade.json`, which the page applies as a colour grade. The reference is only read, not stored.
-
-It turns like a DNA model without a 3D model on the page. The helix is built with screw symmetry (identical
-rungs, a surface that repeats every rung step), so turning it by one rung step looks exactly like sliding it by
-one rung spacing. Blender renders 36 frames across that one step (`src/assets/helix/`); the page plays them in
-order, cross-fading neighbours, and shifts the picture by a rung spacing each time it wraps around. The two
-strands are copies, so the shape repeats every half turn: each frame is one seamless half turn and tiles as tall
-as the screen needs. Frames stream in, a coarse set first, so the page opens before they have all arrived.
+What the render is: a one-off molten sculpture (`--organic`: every rung and swell different, fine liquid ripples)
+in liquid glass with a chrome skin (`"material": "hybrid"`), lit like a high-key product shot (a dark room in
+front, a bright cyc behind, an overhead softbox), shot close-up with perspective and shallow focus. `--sway`
+renders 48 frames across a 50° turn; the page plays them back and forth with cross-fades, dragging turns it
+further and it eases back. About 80 seconds a frame on four CPU cores, so just over an hour for the set.
 Phones get half-size frames.
-`--preview helix-preview.png` renders a perspective close-up for look development, `--check` renders one extra
-frame a full step on to verify the symmetry, and `--look '{"absorb": 2}'` overrides the studio or glass settings
-(see `LOOK` in the script; `"material": "glass"` renders it in glass). The full set takes about 35 minutes on
-four CPU cores.
+
+`grade-helix.py` matches the tone and colour to a reference picture: it ranks the helix pixels of both by
+brightness and maps each grey level of the frames to the brightness and colour the reference has at the same
+rank (histogram matching, with the curve's slope limited so it stays smooth). `--box` is the helix's area in the
+reference, in pixels; `--exclude` leaves out droplets or labels inside it. It writes a 256-entry table,
+`src/assets/helix/grade.json`, that the page applies as a colour grade. The reference is only read, not stored.
+
+Without `--organic`, `--frames` renders the older endless rotation instead: a regular helix with screw symmetry
+(identical rungs), so turning it by one rung step looks exactly like sliding it by one rung spacing; the page
+plays those frames in a loop and shifts the picture a rung each time it wraps. `--preview` renders a single
+close-up for look development, and `--look` overrides the studio or material settings (see `LOOK` in the script).
 
 ## What is in the box
 
@@ -128,7 +126,7 @@ four CPU cores.
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Mercury DNA helix and light studio (Home): Blender rotation frames, colour grade, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py`, `scripts/grade-helix.py` |
+| Glass-chrome DNA helix and light studio (Home): Blender sway frames, colour grade, cursor ripples, drag to turn | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py`, `scripts/grade-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |

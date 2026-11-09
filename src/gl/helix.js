@@ -2,10 +2,16 @@ import * as THREE from 'three';
 import META from '../assets/helix/meta.json';
 import GRADE from '../assets/helix/grade.json';
 
-// Liquid-mercury DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded
-// live: a mirror that reflects the studio and itself only looks right path traced.
+// Liquid glass-chrome DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded
+// live: glass and mirror reflecting and refracting a studio and itself only look right path traced.
 //
-// It turns like a DNA model. The helix is built with screw symmetry (identical rungs, a surface that repeats
+// Two kinds of frame sets, told apart by META.mode:
+//
+// "sway" (the default render): a one-off molten sculpture shot close-up with perspective and shallow focus,
+// rendered at META.frames angles across META.rangeDegrees. It turns slowly back and forth; dragging turns it
+// further, and it eases back. Neighbouring frames are cross-faded, and the top and bottom of the frame fade out.
+//
+// Rotation (older symmetric renders): it turns like a DNA model. The helix is built with screw symmetry (identical rungs, a surface that repeats
 // every rung step), so turning it by one rung step looks exactly like sliding it by one rung spacing. Blender
 // renders META.frames frames across that one step; this plays them in order, cross-fading between neighbours,
 // and each time it wraps around it shifts the picture by one rung spacing. The rungs stay at their height and
@@ -60,7 +66,7 @@ uniform sampler2D uA; uniform sampler2D uB; uniform float uMix; uniform float uS
 uniform float uRepeat; uniform float uOpacity; uniform float uBg;
 uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
 uniform float uFocus; uniform float uBlur; uniform float uWidth; uniform vec4 uSafe; uniform float uDead;
-uniform sampler2D uGrade; uniform float uGradeAmt;
+uniform sampler2D uGrade; uniform float uGradeAmt; uniform float uEdge;
 // grey level -> graded colour (a 256-entry table)
 vec3 lvGrade(float v){ return texture2D(uGrade, vec2((clamp(v, 0.0, 1.0) * 255.0 + 0.5) / 256.0, 0.5)).rgb; }
 varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
@@ -122,6 +128,8 @@ void main(){
   // translucent, so it still reads as coming out of the screen while the words stay legible
   vec2 inX = smoothstep(uSafe.xy - 0.06, uSafe.xy + 0.06, vNdc) * smoothstep(uSafe.zw + 0.06, uSafe.zw - 0.06, vNdc);
   a *= 1.0 - 0.65 * k * inX.x * inX.y;
+  // sway frames end at the top and bottom of the render: fade them out there
+  if (uEdge > 0.0) a *= smoothstep(0.0, uEdge, vUv.y) * smoothstep(1.0, 1.0 - uEdge, vUv.y);
   if (a < 0.002) discard;
 #ifdef DISPLAY_OUT
   // drawn on its own layer above the page: straight to display values, with grain to match the page's
@@ -136,7 +144,8 @@ void main(){
 const OUT_INV = new THREE.Matrix3().set(1.60475, -0.53108, -0.07367, -0.10208, 1.10813, -0.00605, -0.00327, -0.07276, 1.07602).invert();
 const IN_INV = new THREE.Matrix3().set(0.59719, 0.35458, 0.04823, 0.076, 0.90834, 0.01566, 0.0284, 0.13383, 0.83777).invert();
 
-// a greyscale WebP -> a one-channel texture that wraps vertically
+const SWAY = META.mode === 'sway';
+
 // the colour grade table as a 256x1 texture
 function gradeTexture() {
   const data = new Uint8Array(256 * 4);
@@ -147,6 +156,7 @@ function gradeTexture() {
   return t;
 }
 
+// a greyscale WebP -> a one-channel texture (wrapping vertically for rotation frames, which tile)
 async function loadFrame(renderer, url) {
   const blob = await (await fetch(url)).blob();
   const bmp = await createImageBitmap(blob);
@@ -163,7 +173,7 @@ async function loadFrame(renderer, url) {
   canvas.width = canvas.height = 0; // release the canvas memory now
   const t = new THREE.DataTexture(r, w, h, THREE.RedFormat, THREE.UnsignedByteType);
   t.wrapS = THREE.ClampToEdgeWrapping;
-  t.wrapT = THREE.RepeatWrapping;
+  t.wrapT = SWAY ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.magFilter = THREE.LinearFilter;
   t.generateMipmaps = true;
@@ -237,13 +247,16 @@ export class Helix {
   // display: true when the helix draws on its own canvas (no scene tone curve to undo)
   constructor(frames, { mobile = false, reduced = false, display = false }) {
     this.frames = frames;
+    this.sway = SWAY;
     this.mobile = mobile;
     this.reduced = reduced;
-    this.angle = 0.35; // radians, where the turn starts
+    this.angle = SWAY ? 0 : 0.35; // radians: where the turn starts (sway: the middle of the range)
+    this.offset = 0; // sway: how far dragging has turned it from the idle motion
+    this.half = THREE.MathUtils.degToRad((META.rangeDegrees || 0) / 2);
     this.spinVel = 0;
     this.ripple = 0;
     this.lastPointer = null;
-    this.step = THREE.MathUtils.degToRad(META.stepDegrees);
+    this.step = THREE.MathUtils.degToRad(META.stepDegrees || 1);
 
     this.uniforms = {
       uInvOut: { value: OUT_INV },
@@ -270,6 +283,7 @@ export class Helix {
       uDead: { value: 0 },
       uGrade: { value: gradeTexture() },
       uGradeAmt: { value: 1 },
+      uEdge: { value: SWAY ? 0.12 : 0 },
     };
     this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 160), material(HELIX_FRAG, this.uniforms, display ? { DISPLAY_OUT: '' } : {}));
     this.strip.frustumCulled = false;
@@ -287,6 +301,18 @@ export class Helix {
   // tilt: how far it leans towards the camera (radians, lower end forward); focus: camera distance to the centre
   layout(diameter, length, tilt, focus, bend = 0) {
     const s = diameter / META.outer;
+    if (SWAY) {
+      // one picture with its perspective and focus blur baked in: shown flat, at its own proportions
+      this.strip.scale.set(META.tile[0] * s, META.tile[1] * s, 1);
+      this.tilt.rotation.x = 0;
+      const u = this.uniforms;
+      u.uBend.value = 0;
+      u.uRepeat.value = 1;
+      u.uBlur.value = 0;
+      u.uWidth.value = META.tile[0] * s;
+      u.uFocus.value = focus;
+      return;
+    }
     this.strip.scale.set(META.tile[0] * s, length, 1);
     this.tilt.rotation.x = -tilt;
     const u = this.uniforms;
@@ -300,8 +326,26 @@ export class Helix {
 
   dragBy(dxPixels) {
     const v = dxPixels * 0.006; // radians; dragging right turns the front to the right
-    this.angle += v;
+    if (SWAY) this.offset += v;
+    else this.angle += v;
     this.spinVel = this.spinVel * 0.6 + v * 5;
+  }
+
+  // sway: blend the two loaded frames around the current angle
+  setSway() {
+    const frames = this.frames;
+    const n = frames.length;
+    const f = THREE.MathUtils.clamp((this.angle / this.half) * 0.5 + 0.5, 0, 1) * (n - 1);
+    let i0 = Math.floor(f);
+    while (i0 > 0 && !frames[i0]) i0--;
+    let i1 = Math.min(n - 1, i0 + 1);
+    while (i1 < n - 1 && !frames[i1]) i1++;
+    if (!frames[i1]) i1 = i0;
+    const u = this.uniforms;
+    u.uA.value = frames[i0];
+    u.uB.value = frames[i1];
+    u.uMix.value = i1 > i0 ? THREE.MathUtils.clamp((f - i0) / (i1 - i0), 0, 1) : 0;
+    u.uShiftA.value = u.uShiftB.value = 0;
   }
 
   // pick the two loaded frames around the current angle, and the rung-spacing shift of each
@@ -350,6 +394,17 @@ export class Helix {
     this.ripple += (target - this.ripple) * (1 - Math.exp(-dt * (target > this.ripple ? 6 : 1.3)));
     u.uRipple.value = this.ripple;
 
+    if (SWAY) {
+      // slow back-and-forth turn; dragging adds to it with momentum, then it eases back
+      this.spinVel *= Math.exp(-dt * 2.8);
+      this.offset += this.spinVel * dt;
+      this.offset *= Math.exp(-dt * 0.35);
+      const idle = this.reduced ? 0 : Math.sin(time * 0.42) * this.half * 0.82;
+      this.offset = THREE.MathUtils.clamp(this.offset, -2 * this.half, 2 * this.half);
+      this.angle = THREE.MathUtils.clamp(idle + this.offset, -this.half, this.half);
+      this.setSway();
+      return;
+    }
     // slow idle turn plus drag inertia
     this.spinVel *= Math.exp(-dt * 2.8);
     this.angle += ((this.reduced ? 0 : 0.32) + this.spinVel) * dt;
