@@ -254,7 +254,7 @@ function buildBackdrop() {
         vec2 p = (vUv - uCenter) * vec2(uAspect, 1.0);
         float r = length(p * vec2(0.8, 1.0));
         vec3 c = mix(vec3(1.75), vec3(1.05), smoothstep(0.05, 1.25, r));
-        c *= vec3(0.985, 0.99, 1.0);
+        c *= vec3(0.997, 0.998, 1.0); // near-neutral grey paper, as on the poster
         gl_FragColor = vec4(c, uOpacity);
       }`,
   });

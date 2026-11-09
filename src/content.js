@@ -32,10 +32,13 @@ export const site = {
   resume: './himanshu-patial-resume.pdf',
   intro: 'Product manager for payments, growth and AI. I take features from 0 to 1 and through to adoption.',
   proof: [
-    { value: '30%', label: 'of monthly recurring revenue from Autopay', slug: 'payments-autopay', pillar: 'Payments' },
-    { value: '+14%', label: 'bottom-funnel conversion from a WhatsApp purchase flow', slug: 'growth-conversion', pillar: 'Growth' },
-    { value: '₹4M', label: 'a month from AI-Convert, an AI conversion engine', slug: 'ai-products', pillar: 'AI' },
+    { value: '30%', label: 'of monthly recurring revenue from Autopay', slug: 'payments-autopay', pillar: 'Payments', code: 'PAY.01' },
+    { value: '+14%', label: 'bottom-funnel conversion from a WhatsApp purchase flow', slug: 'growth-conversion', pillar: 'Growth', code: 'GRW.02' },
+    { value: '₹4M', label: 'a month from AI-Convert, an AI conversion engine', slug: 'ai-products', pillar: 'AI', code: 'AI.03' },
   ],
+  // Home, poster-style labels: the results heading and the words laid over the helix
+  homeIndex: 'Selected results // Classplus_2022–25',
+  homeOverlay: 'Payments growth AI adoption',
   homeFoot: '3 years at Classplus · Master of Global Business, SP Jain School of Global Management',
 
   aboutLede:

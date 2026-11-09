@@ -137,6 +137,20 @@ Without `--organic`, `--frames` renders the older endless rotation instead: a re
 plays those frames in a loop and shifts the picture a rung each time it wraps. `--preview` renders a single
 close-up for look development, and `--look` overrides the studio or material settings (see `LOOK` in the script).
 
+### Home design system
+
+Home follows the "atomic sleep" poster rather than the rest of the site (scoped under `.is-home` in
+`src/style.css`):
+
+- **Colour:** grey paper (`#e8e8e8`, the studio backdrop), black ink (`#0a0a0b`), slate for secondary text and a
+  single colour, steel blue `#568eb4`, used only as a lens fringe on edges, never as a fill. The three results are
+  told apart by codes (`[PAY.01]`, `[GRW.02]`, `[AI.03]`), not colour; the one in focus picks up the fringe.
+- **Type:** one family, Inter Tight. Display is 800, lowercase, tracked tight (−0.045em), each word of the name led
+  by sliced copies of its first letter (curves for round letters, a streak for stemmed ones). Labels are 500,
+  uppercase, near-normal tracking: `ROLE // FOCUS` section lines, `KEY:` value pairs and `→` arrows.
+- **Overlay:** white heavy uppercase words over the helix that show on its dark metal and vanish on the studio
+  (desktop only).
+
 ## What is in the box
 
 | Area | Where |

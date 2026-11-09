@@ -439,19 +439,35 @@ async function enter(route, prev) {
 /* ------------------------------------------------------------------ */
 /* Home                                                                */
 /* ------------------------------------------------------------------ */
+// Home follows the "atomic sleep" poster: lowercase heavy grotesk with sliced lead letters, bracketed codes,
+// "//" section labels, KEY: value pairs, arrows, monochrome with a steel-blue lens fringe (see .is-home in style.css)
+// letters with a round side slice into curves (their right-hand part); letters with a straight stem, like h,
+// slice into a streak instead (the whole letter, clipped narrower each step), which does not read as another letter
+const BOWL = new Set([...'abcdegopqsu']);
+function nameLine(word) {
+  const first = esc(word[0]);
+  const kind = BOWL.has(word[0]) ? 'bowl' : 'streak';
+  return `<span class="hn-line"><span class="hn-glitch hn-glitch--${kind}" aria-hidden="true"><span>${first}</span><span>${first}</span><span>${first}</span></span><span class="hn-word">${esc(word)}</span></span>`;
+}
+
 function renderHome() {
   const proof = site.proof
     .map(
       (p) =>
-        `<li data-slug="${p.slug}"><a href="#${p.slug}"><span class="hp-v">${esc(p.value)}</span><span class="hp-l">${esc(p.label)}</span><span class="hp-src">${esc(p.pillar)} case study <span aria-hidden="true">→</span></span></a></li>`
+        `<li data-slug="${p.slug}"><a href="#${p.slug}"><span class="hp-code">[${esc(p.code)}]</span><span class="hp-v">${esc(p.value)}</span><span class="hp-l"><b>${esc(p.pillar)}</b> <span aria-hidden="true">→</span> ${esc(p.label)}</span></a></li>`
     )
     .join('');
+  const words = site.name.toLowerCase().split(/\s+/);
   view.innerHTML = `
     <section class="home" aria-labelledby="home-name">
-      <p class="h-eyebrow">${esc(site.role)} · ${esc(site.focus)}</p>
-      <h1 class="h-name" id="home-name">${esc(site.name)}</h1>
+      <p class="h-eyebrow">${esc(site.role)} // ${esc(site.focus)}</p>
+      <h1 class="h-name" id="home-name" aria-label="${esc(site.name)}">${words.map(nameLine).join('')}</h1>
       <p class="h-intro">${esc(site.intro)}</p>
-      <p class="h-status"><span class="dot" aria-hidden="true"></span>${esc(site.availability)} · ${esc(site.location)}</p>
+      <dl class="h-keys">
+        <div><dt>Status:</dt><dd>${esc(site.availability)}</dd></div>
+        <div><dt>Base:</dt><dd>${esc(site.location)}</dd></div>
+      </dl>
+      <p class="h-index">${esc(site.homeIndex)}</p>
       <ul class="h-proof" aria-label="Highlights">${proof}</ul>
       <div class="h-actions">
         <a class="btn btn--solid" href="#work"><span class="btn-fill" aria-hidden="true"></span><span class="btn-text">View work</span><span class="btn-arrow" aria-hidden="true">→</span></a>
@@ -529,13 +545,28 @@ async function enterHome(prev) {
     });
   }
 
-  const name = splitChars($('.h-name'));
+  // white words laid over the helix, as on the poster: they show where the metal is dark and vanish on the
+  // light studio. A layer of their own above the helix canvas, desktop only (see .h-overlay)
+  const overlay = document.createElement('p');
+  overlay.className = 'h-overlay';
+  overlay.setAttribute('aria-hidden', 'true');
+  overlay.textContent = site.homeOverlay;
+  document.body.appendChild(overlay);
+  app.cleanup.push(() => {
+    gsap.to(overlay, { opacity: 0, duration: D(0.4), onComplete: () => overlay.remove() });
+  });
+
+  const name = $$('.hn-word').flatMap((el) => splitChars(el));
+  $$('.hn-word').forEach((el) => el.removeAttribute('aria-label')); // the h1 already carries the name
   const intro = splitWords($('.h-intro'));
   const tl = gsap.timeline({ delay: D(prev ? 0.5 : 0.9) });
   tl.fromTo('.h-eyebrow', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: D(0.9), ease: 'expo.out' }, 0)
     .fromTo(name, { yPercent: 110 }, { yPercent: 0, duration: D(1.3), stagger: 0.035, ease: 'expo.out' }, 0.05)
+    // the sliced lead letters streak in from the left after the name lands
+    .fromTo('.hn-glitch > span', { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: D(0.9), stagger: 0.05, ease: 'expo.out' }, 0.45)
     .fromTo(intro, { yPercent: 105 }, { yPercent: 0, duration: D(1.1), stagger: 0.02, ease: 'expo.out' }, 0.3)
-    .fromTo('.h-status, .h-proof li, .h-actions .btn, .h-foot', { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: D(1), stagger: 0.07, ease: 'expo.out' }, 0.5);
+    .fromTo('.h-keys > div, .h-index, .h-proof li, .h-actions .btn, .h-foot', { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: D(1), stagger: 0.06, ease: 'expo.out' }, 0.5)
+    .fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: D(1.6), ease: 'power2.out' }, 0.9);
   await wait(reduced ? 0 : 300);
 }
 

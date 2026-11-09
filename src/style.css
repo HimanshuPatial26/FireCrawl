@@ -23,24 +23,42 @@
   color-scheme: dark;
 }
 
-/* Home sits in a light studio (the helix backdrop), so its text, the HUD and the cursor switch to ink on paper.
-   Scoped to those elements so the preloader and the dark pages keep their palette. */
+/* Home has its own design system, taken from the "atomic sleep" poster: grey paper, black ink, a cool slate for
+   secondary text and a single colour, a steel-blue lens fringe, used only as an edge (never a fill). One family,
+   Inter Tight, for everything: heavy and lowercase for display, medium and uppercase for labels. Scoped to the
+   Home view, the HUD and the cursor while on Home, so the preloader and the other pages keep their palette. */
 .is-home .hud,
 .is-home .home,
 .is-home .cursor {
-  --fg: #111318;
-  --fg-soft: rgba(17, 19, 24, 0.68);
-  --muted: #565d6b;
-  --line: rgba(17, 19, 24, 0.16);
-  --ink: #f4f5f7;
-  --accent: var(--accent-deep, #2a5fd0);
+  --fg: #0a0a0b;
+  --fg-soft: rgba(10, 10, 11, 0.72);
+  --muted: #565b68;
+  --line: rgba(10, 10, 11, 0.2);
+  --ink: #ececec;
+  --accent: #0a0a0b;
+  --fringe: #568eb4;
+  --slate: #636a7a;
+  --font-display: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+}
+/* labels: medium weight, near-normal tracking, a touch larger than the mono labels elsewhere */
+.is-home .hud-nav a,
+.is-home .sound-label,
+.is-home .cursor-label,
+.is-home .h-eyebrow,
+.is-home .h-foot,
+.is-home .btn {
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.01em;
 }
 .is-home .hud,
 .is-home .home { color: var(--fg); }
 /* a soft white fade under the HUD keeps the links readable where the helix passes behind them */
 .is-home .hud::before {
   inset: 0 0 -72px;
-  background: linear-gradient(to bottom, rgba(238, 240, 242, 0.96) 0%, rgba(238, 240, 242, 0.8) 40%, rgba(238, 240, 242, 0) 100%);
+  background: linear-gradient(to bottom, rgba(237, 237, 238, 0.96) 0%, rgba(237, 237, 238, 0.8) 40%, rgba(237, 237, 238, 0) 100%);
   opacity: 1;
 }
 .is-home .dot { box-shadow: none; }
@@ -300,30 +318,76 @@ figcaption,
   gap: 18px;
   padding-block: calc(env(safe-area-inset-top, 0px) + 92px) calc(env(safe-area-inset-bottom, 0px) + 36px);
 }
-.h-eyebrow { margin: 0; color: var(--muted); }
-.h-name { margin: 0; font: 800 clamp(56px, 7.6vw, 140px) / 0.84 var(--font-display); text-transform: uppercase; letter-spacing: -0.005em; }
-.h-intro { margin: 0; font: 400 clamp(20px, 2.2vw, 34px) / 1.18 var(--font-body); max-width: 26ch; text-wrap: balance; }
-.h-status { margin: 0; display: flex; align-items: flex-start; gap: 10px; color: var(--fg-soft); font-size: 15px; line-height: 1.45; }
-.h-status .dot { flex: none; margin-top: 0.5em; }
+.h-eyebrow { margin: 0; color: var(--fg); }
+/* the name: heavy lowercase, tight, one word per line, each led by sliced copies of its first letter that
+   trail off to the left with the steel-blue fringe on their edge, as on the poster */
+.h-name { margin: 0 0 6px; font: 800 clamp(60px, 8.4vw, 144px) / 0.84 var(--font-display); letter-spacing: -0.045em; }
+.hn-line { display: block; white-space: nowrap; }
+.hn-glitch { display: inline-flex; vertical-align: top; margin-right: 0.04em; }
+.hn-glitch > span { display: inline-block; overflow: hidden; text-shadow: -0.035em 0 0 var(--fringe); }
+/* round letters: the right-hand part of each copy, its curve */
+.hn-glitch--bowl > span { width: 0.27em; text-indent: -0.27em; margin-right: 0.05em; }
+/* stemmed letters: a streak, each copy clipped narrower towards the left */
+.hn-glitch--streak > span { margin-right: 0.04em; }
+.hn-glitch--streak > span:nth-child(1) { width: 0.16em; }
+.hn-glitch--streak > span:nth-child(2) { width: 0.24em; }
+.hn-glitch--streak > span:nth-child(3) { width: 0.34em; }
+.h-intro { margin: 0; font: 400 clamp(18px, 1.55vw, 26px) / 1.22 var(--font-body); letter-spacing: -0.012em; max-width: 30ch; text-wrap: balance; }
+/* KEY: value pairs */
+.h-keys { margin: 0; display: flex; flex-wrap: wrap; gap: 6px 36px; }
+.h-keys div { display: grid; gap: 2px; }
+.h-keys dt { font: 600 12px / 1.3 var(--font-display); text-transform: uppercase; letter-spacing: 0.01em; }
+.h-keys dd { margin: 0; font-size: 14px; line-height: 1.4; color: var(--fg-soft); }
+/* section label, like the poster's CORE DIRECTIVES // NIGHT-SEQUENCE_01 */
+.h-index {
+  margin: 10px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font: 500 clamp(15px, 1.2vw, 19px) / 1.1 var(--font-display);
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
 .h-proof {
   list-style: none;
-  margin: 8px 0 0;
-  padding: 22px 0 0;
-  border-top: 1px solid var(--line);
+  margin: 0;
+  padding: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px;
 }
-.h-proof a { display: grid; gap: 8px; text-decoration: none; }
-.hp-v { font: 800 clamp(40px, 4.2vw, 68px) / 0.9 var(--font-display); color: var(--fg); transition: color 0.6s var(--ease); }
-.hp-l { color: var(--fg-soft); font-size: 14px; line-height: 1.45; }
-.hp-src { color: var(--muted); transition: color 0.4s; }
+.h-proof a { display: grid; gap: 6px; text-decoration: none; color: var(--fg); }
+.hp-code { font: 500 clamp(14px, 1.1vw, 17px) / 1 var(--font-display); letter-spacing: -0.01em; transition: text-shadow 0.5s var(--ease); }
+.hp-v { font: 800 clamp(40px, 3.7vw, 62px) / 0.9 var(--font-display); letter-spacing: -0.045em; transition: text-shadow 0.5s var(--ease); }
+.hp-l { color: var(--fg-soft); font-size: 13px; line-height: 1.42; }
+.hp-l b { font-weight: 600; color: var(--fg); }
+/* the result in focus picks up the poster's fringe; nothing changes colour */
 .h-proof li.is-active .hp-v,
 .h-proof a:hover .hp-v,
-.h-proof a:focus-visible .hp-v { color: var(--accent); }
-.h-proof a:hover .hp-src { color: var(--fg); }
-.h-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }
-.h-foot { margin: 6px 0 0; color: var(--muted); }
+.h-proof a:focus-visible .hp-v { text-shadow: -0.04em 0 0 var(--fringe); }
+.h-proof li.is-active .hp-code,
+.h-proof a:hover .hp-code,
+.h-proof a:focus-visible .hp-code { text-shadow: -1.5px 0 0 var(--fringe); }
+.h-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.is-home .btn { border-color: var(--fg); }
+.is-home .btn--solid:hover .btn-fill { background: var(--slate); }
+.h-foot { margin: 4px 0 0; color: var(--muted); }
+/* white words laid over the helix: legible on its dark metal, gone on the light studio (desktop only) */
+.h-overlay {
+  position: fixed;
+  z-index: 9;
+  right: 2vw;
+  bottom: 11vh;
+  width: 44vw;
+  margin: 0;
+  text-align: center;
+  font: 800 clamp(18px, 1.9vw, 34px) / 1 "Inter Tight", "Helvetica Neue", Arial, sans-serif;
+  white-space: nowrap;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+}
 
 /* ------------------------------------------------------------------ */
 /* Work index                                                          */
@@ -711,6 +775,7 @@ figcaption span { color: var(--fg); }
   .chapter--flip .ch-text,
   .chapter--flip .ch-media { grid-column: 1 / -1; grid-row: auto; }
   .home { width: auto; padding-top: calc(env(safe-area-inset-top, 0px) + 46vh); min-height: 0; }
+  .h-overlay { display: none; }
   .a-exp { grid-template-columns: minmax(0, 1fr); }
   .about { width: auto; padding-top: calc(env(safe-area-inset-top, 0px) + 44vh); }
   .pn-media { width: 70vw; }
@@ -746,6 +811,7 @@ figcaption span { color: var(--fg); }
   .ws-hint { display: none; }
   .a-grid { grid-template-columns: minmax(0, 1fr); }
   .h-proof { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .h-name { font-size: clamp(44px, 15.5vw, 96px); } /* 'lll himanshu' is about 5.6em wide: fits a 360px phone */
   .p-head { column-gap: 12px; }
   .pre-actions .btn { min-width: 0; }
 }
