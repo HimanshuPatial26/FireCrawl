@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import META from '../assets/helix/meta.json';
+import GRADE from '../assets/helix/grade.json';
 
 // Liquid-mercury DNA helix for the Home hero, rendered in Blender (scripts/make-helix.py) rather than shaded
 // live: a mirror that reflects the studio and itself only looks right path traced.
@@ -15,7 +16,7 @@ import META from '../assets/helix/meta.json';
 // blends the nearest frames that have arrived.
 //
 // Frames are greyscale (one byte per pixel on the GPU) on a flat backdrop that the shader keys out; it adds the
-// cool tint and the soft lens colour fringes back. The renders are display-ready sRGB and the site tone maps
+// colour grade (matched to a reference by scripts/grade-helix.py) and the soft lens colour fringes. The renders are display-ready sRGB and the site tone maps
 // the whole scene in its final pass (ACES + sRGB), so the shader undoes that curve first: what leaves the final
 // pass is the Blender render.
 
@@ -59,6 +60,9 @@ uniform sampler2D uA; uniform sampler2D uB; uniform float uMix; uniform float uS
 uniform float uRepeat; uniform float uOpacity; uniform float uBg;
 uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
 uniform float uFocus; uniform float uBlur; uniform float uWidth; uniform vec4 uSafe; uniform float uDead;
+uniform sampler2D uGrade; uniform float uGradeAmt;
+// grey level -> graded colour (a 256-entry table)
+vec3 lvGrade(float v){ return texture2D(uGrade, vec2((clamp(v, 0.0, 1.0) * 255.0 + 0.5) / 256.0, 0.5)).rgb; }
 varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 ${SHARED}
 // one frame pair at a point and mip level: frame A at its own vertical shift, frame B at its own, cross-faded
@@ -110,10 +114,10 @@ void main(){
     c = mix(c, c - g + b, k);
     g = mix(g, b, k);
   }
-  // a cool tint in the darks, neutral in the lights
-  c *= mix(vec3(0.93, 0.955, 0.99), vec3(1.0), smoothstep(0.15, 0.85, g));
   // key out the flat backdrop: anything close to it shows the page's own backdrop instead
   float a = smoothstep(0.01, 0.05, max(abs(g - uBg), max(abs(c.r - uBg), abs(c.b - uBg)))) * uOpacity;
+  // colour grade: each grey level takes the tone and colour the reference has at the same rank
+  c = mix(c, vec3(lvGrade(c.r).r, lvGrade(c.g).g, lvGrade(c.b).b), uGradeAmt);
   // where the out-of-focus near end passes in front of the text (uSafe: a screen rectangle), it turns
   // translucent, so it still reads as coming out of the screen while the words stay legible
   vec2 inX = smoothstep(uSafe.xy - 0.06, uSafe.xy + 0.06, vNdc) * smoothstep(uSafe.zw + 0.06, uSafe.zw - 0.06, vNdc);
@@ -133,6 +137,16 @@ const OUT_INV = new THREE.Matrix3().set(1.60475, -0.53108, -0.07367, -0.10208, 1
 const IN_INV = new THREE.Matrix3().set(0.59719, 0.35458, 0.04823, 0.076, 0.90834, 0.01566, 0.0284, 0.13383, 0.83777).invert();
 
 // a greyscale WebP -> a one-channel texture that wraps vertically
+// the colour grade table as a 256x1 texture
+function gradeTexture() {
+  const data = new Uint8Array(256 * 4);
+  GRADE.lut.forEach(([r, g, b], i) => data.set([r * 255, g * 255, b * 255, 255].map(Math.round), i * 4));
+  const t = new THREE.DataTexture(data, 256, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.magFilter = t.minFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
 async function loadFrame(renderer, url) {
   const blob = await (await fetch(url)).blob();
   const bmp = await createImageBitmap(blob);
@@ -254,6 +268,8 @@ export class Helix {
       uLen: { value: 1 },
       uSafe: { value: new THREE.Vector4(9, 9, 9, 9) }, // off until the stage sets it
       uDead: { value: 0 },
+      uGrade: { value: gradeTexture() },
+      uGradeAmt: { value: 1 },
     };
     this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 160), material(HELIX_FRAG, this.uniforms, display ? { DISPLAY_OUT: '' } : {}));
     this.strip.frustumCulled = false;

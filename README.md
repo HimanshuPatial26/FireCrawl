@@ -98,6 +98,17 @@ python scripts/make-helix.py --frames helix-frames --count 36
 python3 scripts/encode-helix.py helix-frames
 ```
 
+To match the helix's tone and colour to a reference picture, give the helix's area in it (pixels; `--exclude`
+leaves out droplets or labels inside that area):
+
+```bash
+python3 scripts/grade-helix.py reference.jpg helix-frames --box 200 0 565 920
+```
+
+This ranks the helix pixels of both by brightness and maps each grey level of the frames to the brightness and
+colour the reference has at the same rank (histogram matching). It writes a 256-entry colour table,
+`src/assets/helix/grade.json`, which the page applies as a colour grade. The reference is only read, not stored.
+
 It turns like a DNA model without a 3D model on the page. The helix is built with screw symmetry (identical
 rungs, a surface that repeats every rung step), so turning it by one rung step looks exactly like sliding it by
 one rung spacing. Blender renders 36 frames across that one step (`src/assets/helix/`); the page plays them in
@@ -117,7 +128,7 @@ four CPU cores.
 | Louver wall, flip wave, open/close, cursor tilt | `src/gl/shaders.js` (`SLAT_VERT`, `SLAT_FRAG`) |
 | Six generative artwork styles | `src/gl/shaders.js` (`ART`) |
 | Particle portrait | `src/gl/shaders.js` (`PORTRAIT_VERT`), `scripts/make-portrait.py` |
-| Mercury DNA helix and light studio (Home): Blender rotation frames, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py` |
+| Mercury DNA helix and light studio (Home): Blender rotation frames, colour grade, cursor ripples, drag to spin | `src/gl/helix.js`, `scripts/make-helix.py`, `scripts/encode-helix.py`, `scripts/grade-helix.py` |
 | Scene states, transitions, DOM-synced media planes | `src/gl/stage.js` |
 | Mouse fluid simulation (distortion and colour split) | `src/gl/fluid.js` |
 | Generative soundscape and UI sounds (Web Audio) | `src/audio.js` |

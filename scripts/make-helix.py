@@ -39,7 +39,10 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--seed", type=int, default=7)
 ap.add_argument("--pitch", type=float, default=5.8)
 ap.add_argument("--radius", type=float, default=1.0)
-ap.add_argument("--rungs-per-turn", type=int, default=18)
+ap.add_argument("--rungs-per-turn", type=int, default=14, help="even, so the shape repeats every half turn")
+ap.add_argument("--rung-height", type=float, default=0.27)
+ap.add_argument("--rung-depth", type=float, default=0.28)
+ap.add_argument("--rung-shape", type=float, default=4.0, help="cross-section: 2 is round, higher is flatter-faced")
 ap.add_argument("--voxel", type=float, default=0.0145, help="must divide the pitch")
 ap.add_argument("--frames", help="directory for the rotation frames (frame-00.png ...)")
 ap.add_argument("--count", type=int, default=12, help="frames across one rung step")
@@ -55,12 +58,13 @@ STEP = 2 * math.pi / N_RUNGS  # the screw symmetry: turn by STEP, slide by P / N
 assert abs(P / args.voxel - round(P / args.voxel)) < 1e-6, "voxel size must divide the pitch"
 BG = 0.94  # sRGB of the flat backdrop behind the frames; the page keys it out (see src/gl/helix.js)
 LOOK = {
-    # studio (direction -> radiance) for the mercury: a light studio with darker side walls, a white cyc behind,
-    # an overhead softbox, a big soft window up and to the left of the camera, and a dark floor. A mirror shows
-    # only its surroundings, so this is the whole look: silver where it sees the light studio, dark bands where
-    # it sees the walls and floor. The optional tall strips add sparkle but read as dashes, so they are off.
-    "room": 0.75, "walls": 0.15, "cyc": 1.2, "top": 4.5, "front": 1.0, "strips": 0.0, "floor": 0.03,
-    "softbox": 3.0,
+    # studio (direction -> radiance) for the mercury, set up like a high-key chrome product shot: a dark room in
+    # front of the helix (behind the camera) and a bright white cyc behind it, a big overhead softbox, dark floor.
+    # Faces turned towards the camera mirror the dark room, so they go black; edges and tops catch the bright
+    # studio, so they get white rims. That is the black-band, silver-rim look of the reference. The fill and
+    # window behind the camera ("front", "softbox") and the tall strips are available but off.
+    "room": 0.03, "walls": 0.05, "cyc": 1.5, "top": 4.0, "front": 0.0, "strips": 0.0, "floor": 0.03,
+    "softbox": 0.0,
     "tint": [0.98, 0.99, 1.0],
     # glass
     # the helix: liquid mercury (a near-perfect, neutral mirror) or clear glass
@@ -150,7 +154,8 @@ for phase, seed in ((0.0, 1.7), (math.pi, 1.7)):  # same seed: the two strands a
     add_tube(rings)
 
 # ---------------------------------------------------------------- rungs: identical rounded bars that swell into the strands
-RUNG = dict(rh=0.18, rd=0.32, sag=0.015)
+assert N_RUNGS % 2 == 0, "rungs per turn must be even for the half-turn symmetry"
+RUNG = dict(rh=args.rung_height, rd=args.rung_depth, sag=0.015)
 for r in range(math.floor(TH0 / STEP), math.ceil(TH1 / STEP)):
     th = (r + 0.5) * STEP
     if th < TH0 + 0.3 or th > TH1 - 0.3:
@@ -175,7 +180,7 @@ for r in range(math.floor(TH0 / STEP), math.ceil(TH1 / STEP)):
         hh, dd = RUNG["rh"] * flare * wob, RUNG["rd"] * flare
         ring = []
         for j in range(24):
-            x, y = superellipse(2 * math.pi * j / 24, 2.2)
+            x, y = superellipse(2 * math.pi * j / 24, args.rung_shape)
             ring.append(c + side * (dd * 0.5 * x) + up * (hh * 0.5 * y))
         rings.append(ring)
     add_tube(rings)
