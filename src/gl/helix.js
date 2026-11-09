@@ -221,6 +221,8 @@ async function loadFrame(renderer, url) {
   t.unpackAlignment = 1;
   t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   t.needsUpdate = true;
+  // upload now (with its mipmaps) rather than the first time the turn reaches this frame, which would hitch
+  renderer.initTexture?.(t);
   return t;
 }
 
@@ -263,26 +265,32 @@ function buildBackdrop() {
   return mesh;
 }
 
-// load order: every sixth frame first, then every third, then the rest
+// load order: every eighth frame first (spread over the whole turn, so the page can open with it), then every
+// fourth, every second, and the rest; coarse is how many make up that first pass
 function loadOrder(n) {
   const order = [];
-  for (const stride of [6, 3, 1]) for (let i = 0; i < n; i += stride) if (!order.includes(i)) order.push(i);
-  return order;
+  for (const stride of [8, 4, 2, 1]) for (let i = 0; i < n; i += stride) if (!order.includes(i)) order.push(i);
+  return { order, coarse: Math.ceil(n / 8) };
 }
+
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 export class Helix {
   static async create(renderer, opts) {
     const urls = sorted(opts.mobile ? mobileUrls : frameUrls);
     const frames = new Array(urls.length).fill(null);
-    const order = loadOrder(urls.length);
-    const first = Math.min(6, order.length);
+    const { order, coarse: first } = loadOrder(urls.length);
     // one at a time keeps memory peaks low; the page opens once the coarse set is in
     for (const i of order.slice(0, first)) frames[i] = await loadFrame(renderer, urls[i]);
     const flowList = CLOSEUP && META.flow ? sorted(flowUrls) : [];
     const flows = new Array(flowList.length).fill(null);
     const helix = new Helix(frames, opts, flows);
     (async () => {
-      for (const i of order.slice(first)) frames[i] = await loadFrame(renderer, urls[i]);
+      // one per animation frame, so streaming never stalls the turn
+      for (const i of order.slice(first)) {
+        await nextFrame();
+        frames[i] = await loadFrame(renderer, urls[i]);
+      }
       for (let i = 0; i < flowList.length; i++) flows[i] = await loadFlow(flowList[i]);
     })().catch((err) => console.warn('Some helix frames did not load; the turn uses the ones that did.', err));
     return helix;

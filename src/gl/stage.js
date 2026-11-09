@@ -738,7 +738,7 @@ export class Stage {
       // close-up frames carry their own perspective and focus blur, so they are shown flat, larger and near upright
       if (this.helix.closeup) {
         this.helixPose = this.mobile
-          ? { size: 0.34, lean: -1.22, tilt: 0, x: 0.06, y: 0.3, blur: 0, focus: 0, bend: 0 }
+          ? { size: 0.33, lean: -1.22, tilt: 0, x: 0.06, y: 0.325, blur: 0, focus: 0, bend: 0 }
           : { size: 0.62, lean: -0.18, tilt: 0, x: 0.27, y: 0.03, blur: 0, focus: 0, bend: 0 };
       }
       this.scene.add(this.helix.backdrop);

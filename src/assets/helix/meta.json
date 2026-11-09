@@ -1,7 +1,7 @@
 {
-  "mode": "sway",
-  "frames": 48,
-  "rangeDegrees": 50.0,
+  "mode": "spin",
+  "frames": 90,
+  "periodDegrees": 180,
   "tile": [
     3.382857,
     5.074286
