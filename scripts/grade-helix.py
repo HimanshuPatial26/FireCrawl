@@ -30,6 +30,9 @@ ap.add_argument("--grow", type=int, default=3, help="also count bright pixels th
 ap.add_argument("--strength", type=float, default=1.0, help="0 keeps the render, 1 matches the reference")
 ap.add_argument("--max-slope", type=float, default=2.2, help="steepest the tone curve may get (1 = unchanged)")
 ap.add_argument("--min-slope", type=float, default=0.35, help="flattest the tone curve may get")
+ap.add_argument("--shadows", type=float, default=0.0,
+                help="deepen the darks after matching (0 = off): each level v becomes v^(1 + shadows * (1 - v)), "
+                     "so blacks get deeper and highlights stay put")
 args = ap.parse_args()
 
 
@@ -82,6 +85,8 @@ lo, hi = target[0], target[-1]
 slope = np.clip(np.diff(target) * 255, args.min_slope, args.max_slope)
 target = np.concatenate([[0.0], np.cumsum(slope) / 255])
 target = lo + (target - target[0]) * (hi - lo) / max(target[-1] - target[0], 1e-6)
+if args.shadows:
+    target = np.power(np.clip(target, 1e-6, 1), 1 + args.shadows * (1 - target))
 
 bins = 48
 edges = np.linspace(0, 1, bins + 1)

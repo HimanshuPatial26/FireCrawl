@@ -9,7 +9,9 @@ import GRADE from '../assets/helix/grade.json';
 //
 // "sway" (the default render): a one-off molten sculpture shot close-up with perspective and shallow focus,
 // rendered at META.frames angles across META.rangeDegrees. It turns slowly back and forth; dragging turns it
-// further, and it eases back. Neighbouring frames are cross-faded, and the top and bottom of the frame fade out.
+// further, and it eases back. Between two rendered frames the shader draws a true in-between image: a motion map
+// (optical flow, scripts/flow-helix.py) slides both frames towards the in-between position before they are
+// blended, so the motion runs at the display's frame rate instead of stepping. The frame's top and bottom fade out.
 //
 // Rotation (older symmetric renders): it turns like a DNA model. The helix is built with screw symmetry (identical rungs, a surface that repeats
 // every rung step), so turning it by one rung step looks exactly like sliding it by one rung spacing. Blender
@@ -28,6 +30,7 @@ import GRADE from '../assets/helix/grade.json';
 
 const frameUrls = import.meta.glob('../assets/helix/frame-*.webp', { eager: true, query: '?url', import: 'default' });
 const mobileUrls = import.meta.glob('../assets/helix/m-frame-*.webp', { eager: true, query: '?url', import: 'default' });
+const flowUrls = import.meta.glob('../assets/helix/flow-*.webp', { eager: true, query: '?url', import: 'default' });
 const sorted = (urls) => Object.keys(urls).sort().map((k) => urls[k]);
 
 const SHARED = /* glsl */ `
@@ -67,18 +70,24 @@ uniform float uRepeat; uniform float uOpacity; uniform float uBg;
 uniform float uTime; uniform float uRipple; uniform vec2 uMouse; uniform float uAspect; uniform float uFlow;
 uniform float uFocus; uniform float uBlur; uniform float uWidth; uniform vec4 uSafe; uniform float uDead;
 uniform sampler2D uGrade; uniform float uGradeAmt; uniform float uEdge;
+uniform sampler2D uMotion; uniform float uMotionOn; uniform vec2 uMotionScale;
+// motion from frame A to frame B at this point (texture units), when a motion map is in use
+vec2 lvF = vec2(0.0);
 // grey level -> graded colour (a 256-entry table)
 vec3 lvGrade(float v){ return texture2D(uGrade, vec2((clamp(v, 0.0, 1.0) * 255.0 + 0.5) / 256.0, 0.5)).rgb; }
 varying vec2 vUv; varying vec2 vNdc; varying float vViewZ;
 ${SHARED}
 // one frame pair at a point and mip level: frame A at its own vertical shift, frame B at its own, cross-faded
+// (with a motion map, A is sampled where the point was and B where it is going, so the blend moves rather than fades)
 float lvAt(vec2 p, float lod){
-  return mix(textureLod(uA, vec2(p.x, p.y - uShiftA), lod).r, textureLod(uB, vec2(p.x, p.y - uShiftB), lod).r, uMix);
+  vec2 pa = p - uMix * lvF, pb = p + (1.0 - uMix) * lvF;
+  return mix(textureLod(uA, vec2(pa.x, pa.y - uShiftA), lod).r, textureLod(uB, vec2(pb.x, pb.y - uShiftB), lod).r, uMix);
 }
 // the same at full detail, with the true texture gradients so the GPU's anisotropic filtering keeps the
 // helix crisp where the card is foreshortened
 float lvAtG(vec2 p, vec2 gx, vec2 gy){
-  return mix(textureGrad(uA, vec2(p.x, p.y - uShiftA), gx, gy).r, textureGrad(uB, vec2(p.x, p.y - uShiftB), gx, gy).r, uMix);
+  vec2 pa = p - uMix * lvF, pb = p + (1.0 - uMix) * lvF;
+  return mix(textureGrad(uA, vec2(pa.x, pa.y - uShiftA), gx, gy).r, textureGrad(uB, vec2(pb.x, pb.y - uShiftB), gx, gy).r, uMix);
 }
 float lvNoise(vec2 px){ return fract(52.9829189 * fract(dot(px, vec2(0.06711056, 0.00583715)))); }
 void main(){
@@ -91,6 +100,7 @@ void main(){
   float d = length(d2);
   float w = sin(d * 38.0 - uTime * 7.5) * exp(-d * 7.0) * uRipple;
   p += normalize(d2 + 1e-5) * w * vec2(0.03, -0.012);
+  if (uMotionOn > 0.5) lvF = (texture2D(uMotion, p).rg * 255.0 - 128.0) * uMotionScale;
 
   // depth of field, as through a real lens: the blur grows with distance from the focus plane, so the end that
   // comes towards the viewer goes soft and large. Radius in texture units (the frames are square tiles).
@@ -157,6 +167,31 @@ function gradeTexture() {
 }
 
 // a greyscale WebP -> a one-channel texture (wrapping vertically for rotation frames, which tile)
+// a motion map (red: x, green: y) -> a two-channel texture
+async function loadFlow(url) {
+  const bmp = await createImageBitmap(await (await fetch(url)).blob());
+  const { width: w, height: h } = bmp;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  bmp.close?.();
+  const rgba = ctx.getImageData(0, 0, w, h).data;
+  const rg = new Uint8Array(w * h * 2);
+  for (let i = 0, j = 0; i < w * h; i++, j += 4) {
+    rg[i * 2] = rgba[j];
+    rg[i * 2 + 1] = rgba[j + 1];
+  }
+  canvas.width = canvas.height = 0;
+  const t = new THREE.DataTexture(rg, w, h, THREE.RGFormat, THREE.UnsignedByteType);
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  t.magFilter = t.minFilter = THREE.LinearFilter;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  return t;
+}
+
 async function loadFrame(renderer, url) {
   const blob = await (await fetch(url)).blob();
   const bmp = await createImageBitmap(blob);
@@ -237,16 +272,20 @@ export class Helix {
     const first = Math.min(6, order.length);
     // one at a time keeps memory peaks low; the page opens once the coarse set is in
     for (const i of order.slice(0, first)) frames[i] = await loadFrame(renderer, urls[i]);
-    const helix = new Helix(frames, opts);
+    const flowList = SWAY && META.flow ? sorted(flowUrls) : [];
+    const flows = new Array(flowList.length).fill(null);
+    const helix = new Helix(frames, opts, flows);
     (async () => {
       for (const i of order.slice(first)) frames[i] = await loadFrame(renderer, urls[i]);
+      for (let i = 0; i < flowList.length; i++) flows[i] = await loadFlow(flowList[i]);
     })().catch((err) => console.warn('Some helix frames did not load; the turn uses the ones that did.', err));
     return helix;
   }
 
   // display: true when the helix draws on its own canvas (no scene tone curve to undo)
-  constructor(frames, { mobile = false, reduced = false, display = false }) {
+  constructor(frames, { mobile = false, reduced = false, display = false }, flows = []) {
     this.frames = frames;
+    this.flows = flows;
     this.sway = SWAY;
     this.mobile = mobile;
     this.reduced = reduced;
@@ -284,6 +323,14 @@ export class Helix {
       uGrade: { value: gradeTexture() },
       uGradeAmt: { value: 1 },
       uEdge: { value: SWAY ? 0.12 : 0 },
+      uMotion: { value: null },
+      uMotionOn: { value: 0 },
+      // motion map units -> texture units: (value - 128) / scale pixels of the full-size frame
+      uMotionScale: {
+        value: META.flow
+          ? new THREE.Vector2(1 / (META.flow.scale * META.pixels[0]), 1 / (META.flow.scale * META.pixels[1]))
+          : new THREE.Vector2(),
+      },
     };
     this.strip = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 160), material(HELIX_FRAG, this.uniforms, display ? { DISPLAY_OUT: '' } : {}));
     this.strip.frustumCulled = false;
@@ -346,6 +393,10 @@ export class Helix {
     u.uB.value = frames[i1];
     u.uMix.value = i1 > i0 ? THREE.MathUtils.clamp((f - i0) / (i1 - i0), 0, 1) : 0;
     u.uShiftA.value = u.uShiftB.value = 0;
+    // neighbouring frames with a motion map between them: draw the true in-between image
+    const flow = i1 === i0 + 1 ? this.flows[i0] : null;
+    u.uMotion.value = flow;
+    u.uMotionOn.value = flow ? 1 : 0;
   }
 
   // pick the two loaded frames around the current angle, and the rung-spacing shift of each

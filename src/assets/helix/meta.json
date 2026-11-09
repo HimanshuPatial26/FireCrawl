@@ -15,5 +15,12 @@
   "mobilePixels": [
     480,
     720
-  ]
+  ],
+  "flow": {
+    "scale": 4,
+    "pixels": [
+      240,
+      360
+    ]
+  }
 }

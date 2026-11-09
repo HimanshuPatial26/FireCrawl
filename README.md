@@ -98,19 +98,27 @@ python3 scripts/encode-helix.py helix-frames
 ```
 
 ```bash
-python3 scripts/grade-helix.py reference.jpg helix-frames --box 200 0 565 920 --max-slope 2.6
+python3 scripts/flow-helix.py helix-frames
+```
+
+```bash
+python3 scripts/grade-helix.py reference.jpg helix-frames --box 200 0 565 920 --max-slope 2.6 --shadows 1.2
 ```
 
 What the render is: a one-off molten sculpture (`--organic`: every rung and swell different, fine liquid ripples)
 in liquid glass with a chrome skin (`"material": "hybrid"`), lit like a high-key product shot (a dark room in
 front, a bright cyc behind, an overhead softbox), shot close-up with perspective and shallow focus. `--sway`
-renders 48 frames across a 50° turn; the page plays them back and forth with cross-fades, dragging turns it
-further and it eases back. About 80 seconds a frame on four CPU cores, so just over an hour for the set.
+renders 48 frames across a 50° turn; the page plays them back and forth, dragging turns it further and it eases
+back. Between rendered frames the page draws true in-between images: `flow-helix.py` measures how every pixel
+moves from one frame to the next (optical flow; needs `pip install opencv-python-headless`) and saves small motion
+maps (`flow-NN.webp`, 235 KB in all), and the shader slides both frames towards the in-between position before
+blending them, so the motion runs at the display's frame rate rather than stepping or ghosting. About 80 seconds a frame on four CPU cores, so just over an hour for the set.
 Phones get half-size frames.
 
 `grade-helix.py` matches the tone and colour to a reference picture: it ranks the helix pixels of both by
 brightness and maps each grey level of the frames to the brightness and colour the reference has at the same
-rank (histogram matching, with the curve's slope limited so it stays smooth). `--box` is the helix's area in the
+rank (histogram matching, with the curve's slope limited so it stays smooth). `--shadows` then deepens the darks
+(each level v becomes v^(1 + shadows × (1 − v)), so highlights stay put). `--box` is the helix's area in the
 reference, in pixels; `--exclude` leaves out droplets or labels inside it. It writes a 256-entry table,
 `src/assets/helix/grade.json`, that the page applies as a colour grade. The reference is only read, not stored.
 
